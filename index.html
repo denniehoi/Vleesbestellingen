@@ -122,8 +122,8 @@ const TABS=[
 ];
 const BTW=0.09;
 const CFG=window.VB_CONFIG||{};
-const S={bvs:[],keukens:[],producten:[],weken:{},orders:[],pinnen:[]};
-const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd:false}; // keukenweergave
+const S={bvs:[],keukens:[],producten:[],weken:{},orders:[],pinnen:[],instellingen:{}};
+const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd:false,whatsapp:{}}; // keukenweergave
 let MODE=null, PIN=null, SCREEN='laden', tab='bestellen', week=isoWeek(new Date()), keukenSel=null, pending=false;
 const draft={order:{},inkoop:{},lev:{},levKg:{},invoiceFor:null,k:null};
 const eur=new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'});
@@ -149,10 +149,10 @@ async function rpc(name,args){
 const sortArr=a=>a.sort((x,y)=>num(x.volgorde)-num(y.volgorde)||String(x.naam).localeCompare(y.naam));
 async function loadAll(){const j=await rpc('beheer_alles',{p_pin:PIN});
   S.bvs=sortArr(j.bvs||[]);S.keukens=sortArr(j.keukens||[]);S.producten=sortArr(j.producten||[]);S.orders=j.bestellingen||[];
-  S.weken={};for(const w of j.weken||[])S.weken[w.id]=w;S.pinnen=j.pinnen||[]}
-async function loadKeuken(){const j=await rpc('keuken_ophalen',{p_pin:PIN,p_week:week});K.keuken=j.keuken;K.producten=sortArr(j.producten||[]);K.bestelling=j.bestelling;K.geleverd=j.geleverd||{};K.kg=j.kg||{};K.gefactureerd=!!j.gefactureerd;draft.k=null;draft.kk=null}
+  S.weken={};for(const w of j.weken||[])S.weken[w.id]=w;S.pinnen=j.pinnen||[];S.instellingen=(j.instellingen||[]).find(x=>x.id==='algemeen')||{}}
+async function loadKeuken(){const j=await rpc('keuken_ophalen',{p_pin:PIN,p_week:week});K.keuken=j.keuken;K.producten=sortArr(j.producten||[]);K.bestelling=j.bestelling;K.geleverd=j.geleverd||{};K.kg=j.kg||{};K.gefactureerd=!!j.gefactureerd;K.whatsapp=j.whatsapp||{};draft.k=null;draft.kk=null}
 async function put(coll,id,data){const clean={...data};delete clean.id;await rpc('beheer_opslaan',{p_pin:PIN,p_collection:coll,p_id:id,p_data:clean});
-  const row={...clean,id};if(coll==='weken'){S.weken[id]=row;return}
+  const row={...clean,id};if(coll==='weken'){S.weken[id]=row;return}if(coll==='instellingen'){S.instellingen=row;return}
   const arr=coll==='bestellingen'?S.orders:S[coll];const i=arr.findIndex(x=>x.id===id);if(i>=0)arr[i]=row;else arr.push(row);if(coll!=='bestellingen')sortArr(arr)}
 async function del(coll,id){await rpc('beheer_verwijderen',{p_pin:PIN,p_collection:coll,p_id:id});
   if(coll==='weken'){delete S.weken[id];return}const arr=coll==='bestellingen'?S.orders:S[coll];const i=arr.findIndex(x=>x.id===id);if(i>=0)arr.splice(i,1);if(coll==='keukens')S.pinnen=S.pinnen.filter(x=>x!==id)}
@@ -164,6 +164,7 @@ function weekMonday(id){const[y,w]=id.split('-W').map(Number);const j4=new Date(
 function shiftWeek(id,n){const m=weekMonday(id);m.setUTCDate(m.getUTCDate()+7*n);return isoWeek(new Date(m.getUTCFullYear(),m.getUTCMonth(),m.getUTCDate()))}
 function weekRange(id){const m=weekMonday(id),s=new Date(m);s.setUTCDate(m.getUTCDate()+6);const f=d=>d.toLocaleDateString('nl-NL',{day:'numeric',month:'short',timeZone:'UTC'});return f(m)+' – '+f(s)}
 const weekNo=id=>Number(id.split('-W')[1]);
+function waNummer(s){let d=String(s||'').replace(/[^\d+]/g,'');if(d.startsWith('+'))return d.slice(1);if(d.startsWith('00'))return d.slice(2);if(d.startsWith('0'))return '31'+d.slice(1);return d}
 
 /* ---------- berekeningen ---------- */
 const bvName=id=>S.bvs.find(b=>b.id===id)?.naam||'Onbekende BV';
@@ -237,6 +238,13 @@ function vKeuken(){
     <div class="stepper"><button data-kstep="-1" data-pid="${p.id}" aria-label="Minder">−</button><input class="cnt" inputmode="numeric" id="ko-${p.id}" data-korder="${p.id}" value="${num(d[p.id])||''}" placeholder="0" aria-label="Dozen ${esc(p.naam)}"><button data-kstep="1" data-pid="${p.id}" aria-label="Meer">+</button></div></div>`}
   h+=`</div><label class="f">Opmerking<input type="text" id="ko-note" data-knote value="${esc(d.__note)}" placeholder="bijv. graag vóór donderdag"></label>
   <div class="actions"><button class="btn" data-act="kSave">Bestelling opslaan</button>${b?.updatedAt?`<span class="pill">laatst ${new Date(b.updatedAt).toLocaleString('nl-NL',{weekday:'short',hour:'2-digit',minute:'2-digit'})}</span>`:''}</div></div>`;
+  const wa=K.whatsapp||{};const regels=Object.entries(b?.regels||{}).filter(([,n])=>num(n)>0);
+  if(wa.nummer&&regels.length){
+    const lines=[`Bestelling ${K.keuken?.naam} – week ${weekNo(week)} (${weekRange(week)})`,''];
+    for(const p of K.producten){const n=num(b.regels[p.id]);if(n>0)lines.push(`- ${n} ${n===1?'doos':'dozen'} ${p.naam}`)}
+    if(b.opmerking)lines.push('',`Opmerking: ${b.opmerking}`);
+    const href='https://wa.me/'+waNummer(wa.nummer)+'?text='+encodeURIComponent(lines.join('\n'));
+    h+=`<div class="card" style="margin-top:12px"><div class="flow"><span style="flex:1">Bestelling opgeslagen. Stuur hem nu ook naar ${esc(wa.naam||'de inkoper')}.</span></div><a class="btn" style="text-align:center;text-decoration:none" href="${esc(href)}" target="_blank" rel="noopener">Stuur naar ${esc(wa.naam||'inkoper')} via WhatsApp</a><p class="sub" style="margin:0;font-size:13px">WhatsApp opent met het bericht al ingevuld. Tik daar op verzenden. Heb je de bestelling aangepast? Sla hem eerst op, dan stuur je de nieuwe versie.</p></div>`}
   const kgProds=K.producten.filter(p=>p.perKg&&num(K.geleverd[p.id]??b?.regels?.[p.id])>0);
   if(kgProds.length){const kk=draft.kk||(draft.kk={...K.kg});
     h+=`<h2>Ontvangen kilo's</h2><p class="sub">Weeg na ontvangst wat er in de dozen zat en vul het totaal per product in.</p><div class="card"><div>`;
@@ -358,6 +366,11 @@ function vInstellingen(){
   h+=`<h2>Producten</h2><p class="sub">Alles wordt per doos besteld. De richtprijs vult de inkoop alvast in; de echte prijs zet je per week.</p><div class="card">${S.producten.map(p=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)} ${p.perKg?'<span class="pill acc">per kg</span>':''}<small>${p.omschrijving?esc(p.omschrijving)+' · ':''}${p.prijs?eur.format(p.prijs)+(p.perKg?' / kg':' / doos'):'geen richtprijs'}</small></div><button class="btn small ghost" data-act="toggleKg" data-id="${p.id}">${p.perKg?'Afrekenen per doos':'Afrekenen per kg'}</button><button class="btn small ghost" data-act="askDel" data-del="producten/${p.id}">Verwijderen</button></div>`).join('')}
   <div class="row" style="flex-wrap:wrap"><input type="text" id="p-new" placeholder="Product, bijv. Ribeye" style="flex:2 1 140px"><input type="text" id="p-oms" placeholder="Doos, bijv. ±5 kg" style="flex:1 1 100px"><input class="num" inputmode="decimal" id="p-prijs" placeholder="richtprijs"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="p-kg">per kg</label><button class="btn small" data-act="addProduct">Toevoegen</button></div>
   <p class="sub" style="margin:0;font-size:13px">Per kg: keukens bestellen in dozen, maar bij het verdelen vul je per keuken de kilo's in en daarop wordt afgerekend.</p></div>`;
+  const wa=S.instellingen||{};
+  h+=`<h2>WhatsApp</h2><p class="sub">Na het opslaan van een bestelling krijgt elke kok een knop om zijn bestelling via WhatsApp naar deze persoon te sturen. Laat het nummer leeg om de knop te verbergen.</p><div class="card"><div class="grid2">
+  <label class="f">Naam<input type="text" id="wa-naam" value="${esc(wa.naam||'')}" placeholder="bijv. Tarek"></label>
+  <label class="f">Mobiel nummer<input type="text" inputmode="tel" id="wa-nummer" value="${esc(wa.nummer||'')}" placeholder="06 12345678"></label></div>
+  <div class="actions"><button class="btn small" data-act="saveWa">Opslaan</button>${wa.nummer?`<span class="pill ok">actief</span>`:'<span class="pill">uit</span>'}</div></div>`;
   h+=`<h2>Beheerderscode</h2><div class="card"><div class="row" style="flex-wrap:wrap"><input type="password" inputmode="numeric" autocomplete="new-password" id="pin-beheer" placeholder="nieuwe code, min. 6 cijfers" style="flex:1 1 180px"><button class="btn small" data-act="setPin" data-id="__beheer__">Wijzigen</button></div></div>
   <p style="text-align:center"><button class="linkbtn" data-act="logout">Uitloggen</button></p>`;
   if(confirmDel)h=h.replace(`data-act="askDel" data-del="${confirmDel}">Verwijderen`,`data-act="doDel" data-del="${confirmDel}">Zeker weten?`);
@@ -412,6 +425,9 @@ document.addEventListener('click',async e=>{
   if(act==='setHoofd'){return guard(async()=>{for(const{id,...b}of[...S.bvs]){const want=id===t.dataset.id;if(!!b.hoofd!==want)await put('bvs',id,{...b,hoofd:want})}},'Hoofd-BV ingesteld')}
   if(act==='addKeuken'){const n=$('#k-new').value.trim(),bv=$('#k-bv').value;if(!n||!bv)return toast('Vul een naam in en kies een BV');return guard(()=>put('keukens',newId(),{naam:n,bvId:bv,volgorde:Date.now()}),'Keuken toegevoegd. Stel nu een pincode in.')}
   if(act==='addProduct'){const n=$('#p-new').value.trim();if(!n)return toast('Vul een productnaam in');return guard(()=>put('producten',newId(),{naam:n,omschrijving:$('#p-oms').value.trim(),prijs:num($('#p-prijs').value),perKg:$('#p-kg').checked,volgorde:Date.now()}),'Product toegevoegd')}
+  if(act==='saveWa'){const naam=$('#wa-naam').value.trim(),nummer=$('#wa-nummer').value.trim();
+    if(nummer&&waNummer(nummer).replace(/\D/g,'').length<10)return toast('Dit nummer lijkt niet te kloppen. Vul een mobiel nummer in, bijv. 06 12345678');
+    return guard(()=>put('instellingen','algemeen',{...S.instellingen,naam,nummer}),'WhatsApp-instelling opgeslagen')}
   if(act==='setPin'){const wie=t.dataset.id;const inp=wie==='__beheer__'?$('#pin-beheer'):$('#pin-'+wie);const nieuw=inp.value.trim();if(!nieuw)return toast('Vul eerst een nieuwe code in');
     return guard(async()=>{await rpc('beheer_pin_instellen',{p_pin:PIN,p_wie:wie,p_nieuw:nieuw});if(wie==='__beheer__'){PIN=nieuw;store.set('vb-pin',nieuw)}else if(!S.pinnen.includes(wie))S.pinnen.push(wie)},wie==='__beheer__'?'Beheerderscode gewijzigd':'Pincode ingesteld')}
 });
