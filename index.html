@@ -127,7 +127,8 @@ const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd
 const B={keukens:[],producten:[],bestellingen:[],afgeleverd:{},instellingen:{}}; // bezorgerweergave
 const fmtTijd=iso=>new Date(iso).toLocaleString('nl-NL',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
 let MODE=null, PIN=null, SCREEN='laden', tab='bestellen', week=isoWeek(new Date()), keukenSel=null, pending=false;
-const draft={order:{},inkoop:{},lev:{},levKg:{},invoiceFor:null,k:null,periode:'alles'};
+const draft={order:{},inkoop:{},lev:{},levKg:{},levOpen:{},invoiceFor:null,k:null,periode:'alles'};
+document.addEventListener('toggle',e=>{const d=e.target;if(d.dataset?.levopen)draft.levOpen[d.dataset.levopen]=d.open},true);
 const eur=new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'});
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -354,17 +355,20 @@ function factCheck(tot,f){if(String(f??'').trim()==='')return'';const diff=r2(nu
 
 function vVerdelen(){
   const setup=needSetup();if(setup)return'<h2>Verdelen</h2>'+setup;
-  const prods=productsInWeek(week);
-  let h=`<h2>Verdelen week ${weekNo(week)}</h2><p class="sub">Vul in hoeveel dozen elke keuken echt heeft gekregen. Wat besteld is, staat al ingevuld. Kilo's die keukens zelf hebben ingevuld, zie je hier terug; je kunt ze aanpassen.</p>`;
-  if(!prods.length)return h+'<p class="empty">Nog niets besteld deze week.</p>';
+  let h=`<h2>Verdelen week ${weekNo(week)}</h2><p class="sub">Vul in hoeveel dozen elke keuken echt heeft gekregen. Wat besteld is, staat al ingevuld. Iets meegegeven dat niet besteld was? Open "Ander product" bij die keuken. Kilo's die keukens zelf hebben ingevuld, zie je hier terug.</p>`;
   if(draft.lev.week!==week){draft.lev={week};draft.levKg={}}
-  for(const k of S.keukens){
-    h+=`<div class="card" style="margin-bottom:12px"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span>${afPill(k.id)}</div><div>`;
-    for(const p of prods){const b=besteld(week,k.id,p.id);const v=draft.lev[k.id]?.[p.id]??geleverd(week,k.id,p.id);
+  const levNu=(kid,pid)=>num(draft.lev[kid]?.[pid]??geleverd(week,kid,pid));
+  const rij=(k,p)=>{const b=besteld(week,k.id,p.id);const v=draft.lev[k.id]?.[p.id]??geleverd(week,k.id,p.id);
       const kgv=draft.levKg?.[k.id]?.[p.id]??kgGeleverd(week,k.id,p.id)??'';
-      h+=`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)}<small>besteld ${b} · ${eur.format(prijs(week,p.id))}/${p.perKg?'kg':'doos'}</small></div><div class="stepper"><button data-lstep="-1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Minder">−</button><input class="cnt" inputmode="numeric" id="l-${k.id}-${p.id}" data-lev="${k.id}|${p.id}" value="${v}"><button data-lstep="1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Meer">+</button></div>
-      ${p.perKg?`<label class="f" style="flex-direction:row;align-items:center;gap:6px"><input class="num" inputmode="decimal" id="lk-${k.id}-${p.id}" data-levkg="${k.id}|${p.id}" value="${esc(String(kgv).replace('.',','))}" placeholder="kg" aria-label="Kilo ${esc(p.naam)} ${esc(k.naam)}">kg</label>`:''}</div>`}
+      return`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)}<small>besteld ${b} · ${eur.format(prijs(week,p.id))}/${p.perKg?'kg':'doos'}</small></div><div class="stepper"><button data-lstep="-1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Minder">−</button><input class="cnt" inputmode="numeric" id="l-${k.id}-${p.id}" data-lev="${k.id}|${p.id}" value="${v}"><button data-lstep="1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Meer">+</button></div>
+      ${p.perKg?`<label class="f" style="flex-direction:row;align-items:center;gap:6px"><input class="num" inputmode="decimal" id="lk-${k.id}-${p.id}" data-levkg="${k.id}|${p.id}" value="${esc(String(kgv).replace('.',','))}" placeholder="kg" aria-label="Kilo ${esc(p.naam)} ${esc(k.naam)}">kg</label>`:''}</div>`};
+  for(const k of S.keukens){
+    const actief=S.producten.filter(p=>besteld(week,k.id,p.id)>0||levNu(k.id,p.id)>0),rest=S.producten.filter(p=>!actief.includes(p));
+    h+=`<div class="card" style="margin-bottom:12px"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span>${afPill(k.id)}</div><div>`;
+    h+=actief.map(p=>rij(k,p)).join('')||'<p class="sub" style="margin:0">Niets besteld.</p>';
+    if(rest.length)h+=`<details${draft.levOpen?.[k.id]?' open':''} data-levopen="${k.id}"><summary style="cursor:pointer;color:var(--accent);font-weight:600;padding-block:8px">+ Ander product</summary>${rest.map(p=>rij(k,p)).join('')}</details>`;
     h+='</div></div>'}
+  const prods=S.producten.filter(p=>totBesteld(week,p.id)>0||S.keukens.some(k=>levNu(k.id,p.id)>0));
   const v=voorraad();const done=verdeeld(week);
   const rows=prods.map(p=>{const lev=S.keukens.reduce((s,k)=>s+num(draft.lev[k.id]?.[p.id]??geleverd(week,k.id,p.id)),0);const na=done?v[p.id].op:v[p.id].op-lev;return{p,lev,na}});
   const gewijzigd=done?prods.filter(p=>S.weken[week]?.prijzen?.[p.id]!=null&&num(S.weken[week].prijzen[p.id])!==num(p.prijs)):[];
@@ -496,13 +500,13 @@ document.addEventListener('click',async e=>{
     render();$('#i-form')?.scrollIntoView({behavior:'smooth'});return}
   if(act==='cancelInkoop'){draft.inkoop={};render();return}
   if(act==='refreshPrijzen'){const prijzen={...(S.weken[week]?.prijzen||{})};for(const p of productsInWeek(week))prijzen[p.id]=num(p.prijs);return guard(()=>saveWeek({prijzen}),'Prijzen bijgewerkt')}
-  if(act==='saveLev'){const g={};for(const k of S.keukens){g[k.id]={};for(const p of productsInWeek(week)){const el=$(`#l-${k.id}-${p.id}`);if(el)g[k.id][p.id]=num(el.value)}}
+  if(act==='saveLev'){const g={};for(const k of S.keukens){g[k.id]={};for(const p of S.producten){const el=$(`#l-${k.id}-${p.id}`);if(el&&(num(el.value)>0||besteld(week,k.id,p.id)>0))g[k.id][p.id]=num(el.value)}}
     const mine=JSON.parse(JSON.stringify(draft.levKg||{}));
     return guard(async()=>{
       await loadAll(); // haal kilo's op die keukens net zelf hebben ingevuld
       const kg=JSON.parse(JSON.stringify(S.weken[week]?.kg||{}));
       for(const[kid,ps]of Object.entries(mine))for(const[pid,v]of Object.entries(ps)){const m=kg[kid]||(kg[kid]={});if(String(v).trim()==='')delete m[pid];else m[pid]=num(v)}
-      const prijzen={...(S.weken[week]?.prijzen||{})};for(const p of productsInWeek(week))if(prijzen[p.id]==null)prijzen[p.id]=prijs(week,p.id); // prijzen vastzetten
+      const prijzen={...(S.weken[week]?.prijzen||{})};for(const p of S.producten)if(prijzen[p.id]==null&&Object.values(g).some(x=>num(x[p.id])>0))prijzen[p.id]=prijs(week,p.id); // prijzen vastzetten
       await saveWeek({geleverd:g,kg,prijzen,inkoopBv:crediteur(week)});draft.lev={};draft.levKg={}},'Verdeling opgeslagen')}
   if(act==='copy'){const ta=$('#inv-txt');try{await navigator.clipboard.writeText(ta.value);toast('Gekopieerd')}catch(_){ta.focus();ta.select();toast('Tekst geselecteerd, kopieer hem nu')}return}
   if(act==='addBv'){const n=$('#bv-new').value.trim();if(!n)return toast('Vul een naam in');return guard(()=>put('bvs',newId(),{naam:n,volgorde:Date.now()}),'BV toegevoegd')}
