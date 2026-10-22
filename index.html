@@ -115,17 +115,19 @@ textarea{width:100%;min-height:160px;font:13px/1.4 ui-monospace,Consolas,monospa
 <script>
 const TABS=[
   ['bestellen','Bestellen','<path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>'],
-  ['inkoop','Inkoop','<path d="M3 5h2l2.2 10.5h11L21 8H6.3" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="9" cy="19.5" r="1.5" fill="currentColor"/><circle cx="17" cy="19.5" r="1.5" fill="currentColor"/>'],
+  ['inkoop','Voorraad','<path d="M3 5h2l2.2 10.5h11L21 8H6.3" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="9" cy="19.5" r="1.5" fill="currentColor"/><circle cx="17" cy="19.5" r="1.5" fill="currentColor"/>'],
   ['verdelen','Verdelen','<path d="M3 8l9-5 9 5v8l-9 5-9-5z M3 8l9 5 9-5 M12 13v8" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'],
   ['afrekening','Afrekening','<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z M9 8h6M9 12h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'],
   ['instellingen','Instellingen','<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>']
 ];
 const BTW=0.09;
 const CFG=window.VB_CONFIG||{};
-const S={bvs:[],keukens:[],producten:[],weken:{},orders:[],pinnen:[],instellingen:{}};
-const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd:false,whatsapp:{}}; // keukenweergave
+const S={bvs:[],keukens:[],producten:[],weken:{},orders:[],pinnen:[],instellingen:{},inkopen:[]};
+const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd:false,whatsapp:{},afgeleverd:null}; // keukenweergave
+const B={keukens:[],producten:[],bestellingen:[],afgeleverd:{},instellingen:{}}; // bezorgerweergave
+const fmtTijd=iso=>new Date(iso).toLocaleString('nl-NL',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
 let MODE=null, PIN=null, SCREEN='laden', tab='bestellen', week=isoWeek(new Date()), keukenSel=null, pending=false;
-const draft={order:{},inkoop:{},lev:{},levKg:{},invoiceFor:null,k:null};
+const draft={order:{},inkoop:{},lev:{},levKg:{},invoiceFor:null,k:null,periode:'alles'};
 const eur=new Intl.NumberFormat('nl-NL',{style:'currency',currency:'EUR'});
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -149,11 +151,13 @@ async function rpc(name,args){
 const sortArr=a=>a.sort((x,y)=>num(x.volgorde)-num(y.volgorde)||String(x.naam).localeCompare(y.naam));
 async function loadAll(){const j=await rpc('beheer_alles',{p_pin:PIN});
   S.bvs=sortArr(j.bvs||[]);S.keukens=sortArr(j.keukens||[]);S.producten=sortArr(j.producten||[]);S.orders=j.bestellingen||[];
-  S.weken={};for(const w of j.weken||[])S.weken[w.id]=w;S.pinnen=j.pinnen||[];S.instellingen=(j.instellingen||[]).find(x=>x.id==='algemeen')||{}}
-async function loadKeuken(){const j=await rpc('keuken_ophalen',{p_pin:PIN,p_week:week});K.keuken=j.keuken;K.producten=sortArr(j.producten||[]);K.bestelling=j.bestelling;K.geleverd=j.geleverd||{};K.kg=j.kg||{};K.gefactureerd=!!j.gefactureerd;K.whatsapp=j.whatsapp||{};draft.k=null;draft.kk=null}
+  S.weken={};for(const w of j.weken||[])S.weken[w.id]=w;S.pinnen=j.pinnen||[];S.instellingen=(j.instellingen||[]).find(x=>x.id==='algemeen')||{};
+  S.inkopen=(j.inkopen||[]).sort((a,b)=>String(b.datum).localeCompare(String(a.datum)))}
+async function loadKeuken(){const j=await rpc('keuken_ophalen',{p_pin:PIN,p_week:week});K.keuken=j.keuken;K.producten=sortArr(j.producten||[]);K.bestelling=j.bestelling;K.geleverd=j.geleverd||{};K.kg=j.kg||{};K.gefactureerd=!!j.gefactureerd;K.whatsapp=j.whatsapp||{};K.afgeleverd=j.afgeleverd||null;draft.k=null;draft.kk=null}
+async function loadBezorger(){const j=await rpc('bezorger_ophalen',{p_pin:PIN,p_week:week});B.keukens=sortArr(j.keukens||[]);B.producten=sortArr(j.producten||[]);B.bestellingen=j.bestellingen||[];B.afgeleverd=j.afgeleverd||{};B.instellingen=j.instellingen||{}}
 async function put(coll,id,data){const clean={...data};delete clean.id;await rpc('beheer_opslaan',{p_pin:PIN,p_collection:coll,p_id:id,p_data:clean});
   const row={...clean,id};if(coll==='weken'){S.weken[id]=row;return}if(coll==='instellingen'){S.instellingen=row;return}
-  const arr=coll==='bestellingen'?S.orders:S[coll];const i=arr.findIndex(x=>x.id===id);if(i>=0)arr[i]=row;else arr.push(row);if(coll!=='bestellingen')sortArr(arr)}
+  const arr=coll==='bestellingen'?S.orders:S[coll];const i=arr.findIndex(x=>x.id===id);if(i>=0)arr[i]=row;else arr.push(row);if(coll!=='bestellingen'&&coll!=='inkopen')sortArr(arr)}
 async function del(coll,id){await rpc('beheer_verwijderen',{p_pin:PIN,p_collection:coll,p_id:id});
   if(coll==='weken'){delete S.weken[id];return}const arr=coll==='bestellingen'?S.orders:S[coll];const i=arr.findIndex(x=>x.id===id);if(i>=0)arr.splice(i,1);if(coll==='keukens')S.pinnen=S.pinnen.filter(x=>x!==id)}
 function logout(silent){PIN=null;MODE=null;store.set('vb-pin',null);SCREEN='login';if(!silent)render()}
@@ -173,13 +177,26 @@ function ordersOf(w){return S.orders.filter(o=>o.week===w&&keuken(o.keukenId))}
 function besteld(w,kid,pid){const o=S.orders.find(o=>o.week===w&&o.keukenId===kid);return num(o?.regels?.[pid])}
 function geleverd(w,kid,pid){const v=S.weken[w]?.geleverd?.[kid]?.[pid];return v==null?besteld(w,kid,pid):num(v)}
 function totBesteld(w,pid){return ordersOf(w).reduce((s,o)=>s+num(o.regels?.[pid]),0)}
-function prijs(w,pid){const v=S.weken[w]?.items?.[pid]?.prijs;return v==null?num(S.producten.find(p=>p.id===pid)?.prijs):num(v)}
-function ingekocht(w,pid){const v=S.weken[w]?.items?.[pid]?.dozen;return v==null?totBesteld(w,pid):num(v)}
-function productsInWeek(w){return S.producten.filter(p=>totBesteld(w,p.id)>0||S.weken[w]?.items?.[p.id])}
+// Prijs per doos (of per kg) waartegen een week wordt doorbelast: vastgelegd bij het opslaan van de verdeling,
+// anders de actuele kostprijs van het product (= prijs van de laatste inkoopfactuur).
+function prijs(w,pid){const wk=S.weken[w];const v=wk?.prijzen?.[pid]??wk?.items?.[pid]?.prijs;return v==null?num(S.producten.find(p=>p.id===pid)?.prijs):num(v)}
+function productsInWeek(w){const g=S.weken[w]?.geleverd||{};return S.producten.filter(p=>totBesteld(w,p.id)>0||Object.values(g).some(x=>num(x?.[p.id])>0))}
 const isKg=pid=>!!S.producten.find(p=>p.id===pid)?.perKg;
 const kgFmt=n=>(Math.round(n*100)/100).toLocaleString('nl-NL')+' kg';
 function kgGeleverd(w,kid,pid){const v=S.weken[w]?.kg?.[kid]?.[pid];return v==null?null:num(v)}
-function kgIngekocht(w,pid){const v=S.weken[w]?.items?.[pid]?.kg;return v==null?null:num(v)}
+const hoofdBv=()=>S.bvs.find(b=>b.hoofd)?.id||S.bvs[0]?.id;
+const crediteur=w=>S.weken[w]?.inkoopBv||hoofdBv();
+const verdeeld=w=>!!S.weken[w]?.geleverd; // verdeling van deze week is opgeslagen
+// Voorraad: alles wat via inkoopfacturen binnenkwam, min wat in opgeslagen verdelingen is uitgeleverd.
+function voorraad(){
+  const v={};for(const p of S.producten)v[p.id]={in:0,inKg:0,uit:0,uitKg:0,open:0};
+  for(const f of S.inkopen)for(const[pid,r]of Object.entries(f.regels||{})){if(!v[pid])continue;v[pid].in+=num(r.dozen);v[pid].inKg+=num(r.kg)}
+  for(const[w,wd]of Object.entries(S.weken)){
+    if(wd.geleverd){for(const ps of Object.values(wd.geleverd))for(const[pid,n]of Object.entries(ps||{}))if(v[pid])v[pid].uit+=num(n);
+      for(const ps of Object.values(wd.kg||{}))for(const[pid,n]of Object.entries(ps||{}))if(v[pid])v[pid].uitKg+=num(n)}
+    else for(const o of ordersOf(w))for(const[pid,n]of Object.entries(o.regels||{}))if(v[pid])v[pid].open+=num(n)}
+  for(const x of Object.values(v)){x.op=x.in-x.uit;x.opKg=r2(x.inKg-x.uitKg)}
+  return v}
 function perBV(w){ // {bvId:{bedrag, kgOpen, regels:[{kid,pid,dozen,kg,prijs,bedrag}]}}
   const out={};
   for(const k of S.keukens){for(const p of S.producten){const d=geleverd(w,k.id,p.id);if(!d)continue;
@@ -187,15 +204,9 @@ function perBV(w){ // {bvId:{bedrag, kgOpen, regels:[{kid,pid,dozen,kg,prijs,bed
     const kg=p.perKg?kgGeleverd(w,k.id,p.id):null;if(p.perKg&&kg==null)o.kgOpen=true;
     const b=r2(p.perKg?(kg||0)*pr:d*pr);o.bedrag=r2(o.bedrag+b);o.regels.push({kid:k.id,pid:p.id,dozen:d,kg,prijs:pr,bedrag:b})}}
   return out}
-function weekFacts(w){
-  const prods=productsInWeek(w);let inkoopTot=0,levTot=0,restTot=0;
-  const rows=prods.map(p=>{const ink=ingekocht(w,p.id),lev=S.keukens.reduce((s,k)=>s+geleverd(w,k.id,p.id),0),pr=prijs(w,p.id);
-    if(p.perKg){const ik=kgIngekocht(w,p.id)||0,lk=S.keukens.reduce((s,k)=>s+(kgGeleverd(w,k.id,p.id)||0),0);
-      inkoopTot+=ik*pr;levTot+=lk*pr;restTot+=(ik-lk)*pr;return{p,ink,lev,rest:ink-lev,pr,ik,lk,restKg:r2(ik-lk)}}
-    inkoopTot+=ink*pr;levTot+=lev*pr;restTot+=(ink-lev)*pr;return{p,ink,lev,rest:ink-lev,pr}});
-  return{rows,inkoopTot:r2(inkoopTot),levTot:r2(levTot),restTot:r2(restTot)}}
 function lineTotal(pid){const d=num($('#i-d-'+pid).value),p=num($('#i-p-'+pid).value);return isKg(pid)?num($('#i-k-'+pid)?.value)*p:d*p}
-async function saveWeek(patch){const cur=S.weken[week]||{};await put('weken',week,{...cur,...patch,week})}
+async function saveWeek(patch){await loadAll(); // eerst verversen, zodat afvinkingen en kilo's van anderen blijven staan
+  const cur=S.weken[week]||{};await put('weken',week,{...cur,...patch,week})}
 
 /* ---------- algemeen ---------- */
 function toast(t){const el=$('#toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2600)}
@@ -206,10 +217,10 @@ document.addEventListener('focusout',()=>setTimeout(()=>{if(pending&&!editing())
 
 /* ---------- render ---------- */
 function renderChrome(){
-  const inApp=MODE==='beheer'||MODE==='keuken';
-  $('#top').hidden=!inApp;$('#nav').hidden=MODE!=='beheer';
+  const inApp=(MODE==='beheer'||MODE==='keuken'||MODE==='bezorger')&&SCREEN!=='login';
+  $('#top').hidden=!inApp;$('#nav').hidden=!(inApp&&MODE==='beheer');
   if(!inApp)return;
-  $('#brand').textContent=MODE==='keuken'?(K.keuken?.naam||'Keuken'):'Vleesbestellingen';
+  $('#brand').textContent=MODE==='keuken'?(K.keuken?.naam||'Keuken'):MODE==='bezorger'?'Bezorgen':'Vleesbestellingen';
   $('#wlbl').innerHTML='<b>Week '+weekNo(week)+'</b><span>'+esc(weekRange(week))+'</span>';
   $('#tabs').innerHTML=TABS.map(([id,l,ic])=>`<button data-tab="${id}" ${tab===id?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>${l}</button>`).join('')}
 function render(){
@@ -226,12 +237,16 @@ function render(){
     <input type="password" inputmode="numeric" autocomplete="current-password" id="pin" placeholder="••••" aria-label="Pincode" autofocus>
     <button class="btn" type="submit">Inloggen</button></form>`;setTimeout(()=>$('#pin')?.focus(),50);return}
   if(MODE==='keuken'){m.innerHTML=vKeuken();return}
-  m.innerHTML=({bestellen:vBestellen,inkoop:vInkoop,verdelen:vVerdelen,afrekening:vAfrekening,instellingen:vInstellingen})[tab]()}
+  if(MODE==='bezorger'){m.innerHTML=vBezorger();return}
+  let h=({bestellen:vBestellen,inkoop:vInkoop,verdelen:vVerdelen,afrekening:vAfrekening,instellingen:vInstellingen})[tab]();
+  if(confirmDel)h=h.replace(`data-act="askDel" data-del="${confirmDel}">Verwijderen`,`data-act="doDel" data-del="${confirmDel}">Zeker weten?`);
+  m.innerHTML=h}
 
 /* ---------- keukenweergave ---------- */
 function vKeuken(){
   const b=K.bestelling;const d=draft.k||(draft.k={...(b?.regels||{}),__note:b?.opmerking||''});
   let h=`<h2>Bestelling week ${weekNo(week)}</h2><p class="sub">Vul per product het aantal dozen in en tik op opslaan. Je kunt het later nog aanpassen.</p>
+  ${K.afgeleverd?`<div class="note ok" style="margin-bottom:12px">Afgeleverd op ${esc(fmtTijd(K.afgeleverd.op))}.</div>`:''}
   <div class="card"><div class="flow"><h3 style="margin:0;flex:1">${esc(K.keuken?.naam)}</h3>${b?'<span class="pill ok">Opgeslagen</span>':'<span class="pill warn">Nog niet besteld</span>'}</div><div>`;
   if(!K.producten.length)h+='<p class="empty">Er staan nog geen producten klaar.</p>';
   for(const p of K.producten){h+=`<div class="row"><div class="name">${esc(p.naam)}<small>per doos${p.omschrijving?' · '+esc(p.omschrijving):''}</small></div>
@@ -254,7 +269,22 @@ function vKeuken(){
   h+=`<p style="text-align:center"><button class="linkbtn" data-act="logout">Uitloggen</button></p>`;
   return h}
 
+/* ---------- bezorgerweergave ---------- */
+function vBezorger(){
+  const orders=B.bestellingen.filter(o=>Object.values(o.regels||{}).some(n=>num(n)>0));
+  const klaar=orders.filter(o=>B.afgeleverd[o.keukenId]).length;
+  let h=`<h2>Bezorgen week ${weekNo(week)}</h2><p class="sub">Vink een keuken af zodra de bestelling daar is afgeleverd.</p>`;
+  if(!orders.length)return h+'<p class="empty">Er zijn nog geen bestellingen voor deze week.</p><p style="text-align:center"><button class="linkbtn" data-act="logout">Uitloggen</button></p>';
+  h+=`<div class="flow" style="margin-bottom:12px"><span class="pill ${klaar===orders.length?'ok':'warn'}">${klaar} van ${orders.length} afgeleverd</span></div><div class="stack">`;
+  for(const k of B.keukens){const o=orders.find(x=>x.keukenId===k.id);if(!o)continue;const af=B.afgeleverd[k.id];
+    h+=`<div class="card"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3>${af?`<span class="pill ok">Afgeleverd ${esc(fmtTijd(af.op))}</span>`:'<span class="pill warn">Nog brengen</span>'}</div><div>`;
+    for(const p of B.producten){const n=num(o.regels?.[p.id]);if(n>0)h+=`<div class="row"><div class="name">${esc(p.naam)}</div><b>${n} ${n===1?'doos':'dozen'}</b></div>`}
+    h+=`</div>${o.opmerking?`<div class="note">${esc(o.opmerking)}</div>`:''}
+    <div class="actions">${af?`<button class="btn ghost" data-afvink="${k.id}" data-val="0">Toch niet afgeleverd</button>`:`<button class="btn" data-afvink="${k.id}" data-val="1">Afgeleverd ✓</button>`}</div></div>`}
+  return h+'</div><p style="text-align:center"><button class="linkbtn" data-act="logout">Uitloggen</button></p>'}
+
 /* ---------- beheer ---------- */
+const afPill=kid=>{const a=S.weken[week]?.afgeleverd?.[kid];return a?`<span class="pill ok">Afgeleverd ${esc(fmtTijd(a.op))}</span>`:''};
 function needSetup(){
   if(S.producten.length&&S.keukens.length)return'';
   return`<div class="card"><h3>Eerst even inrichten</h3><p class="sub" style="margin:0">Voeg bij <b>Instellingen</b> je producten (per doos) en de keukens per BV toe.</p><div><button class="btn" data-tab="instellingen">Naar instellingen</button></div></div>`}
@@ -267,7 +297,7 @@ function vBestellen(){
   const ordered=new Set(ordersOf(week).map(o=>o.keukenId));
   let h=`<h2>Bestellingen week ${weekNo(week)}</h2><p class="sub">Keukens bestellen zelf met hun pincode. Hier kun je ook voor een keuken invullen.</p>
   <div class="chips" style="margin-bottom:12px">${S.keukens.map(x=>`<button class="chip" data-keuken="${x.id}" aria-pressed="${x.id===k.id}">${esc(x.naam)}<small>${ordered.has(x.id)?'✓':''}</small></button>`).join('')}</div>
-  <div class="card"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span>${saved?'<span class="pill ok">Besteld</span>':'<span class="pill warn">Nog niet besteld</span>'}</div><div>`;
+  <div class="card"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span>${saved?'<span class="pill ok">Besteld</span>':'<span class="pill warn">Nog niet besteld</span>'}${afPill(k.id)}</div><div>`;
   for(const p of S.producten){h+=`<div class="row"><div class="name">${esc(p.naam)}<small>per doos${p.omschrijving?' · '+esc(p.omschrijving):''}</small></div>
     <div class="stepper"><button data-step="-1" data-pid="${p.id}" aria-label="Minder">−</button><input class="cnt" inputmode="numeric" id="o-${p.id}" data-order="${p.id}" value="${num(d[p.id])||''}" placeholder="0" aria-label="Dozen ${esc(p.naam)}"><button data-step="1" data-pid="${p.id}" aria-label="Meer">+</button></div></div>`}
   h+=`</div><label class="f">Opmerking<input type="text" id="o-note" data-ordernote value="${esc(d.__note??saved?.opmerking??'')}" placeholder="bijv. graag vóór donderdag"></label>
@@ -281,25 +311,43 @@ function vBestellen(){
     h+='</div>'}
   return h}
 
+const dec=v=>esc(String(v??'').replace('.',','));
+const fmtDatum=s=>s?new Date(s+'T12:00:00').toLocaleDateString('nl-NL',{day:'numeric',month:'short',year:'numeric'}):'';
 function vInkoop(){
-  const setup=needSetup();if(setup)return'<h2>Inkoop</h2>'+setup;
-  const wk=S.weken[week]||{};const d=draft.inkoop;
-  if(d.week!==week){Object.assign(d,{week,bv:wk.inkoopBv||S.bvs.find(b=>b.hoofd)?.id||S.bvs[0]?.id,factuur:wk.factuurTotaal??'',items:{}})}
-  const prods=productsInWeek(week);
-  let h=`<h2>Inkoop week ${weekNo(week)}</h2><p class="sub">Zet hier wat je bij de groothandel hebt gekocht, met de echte prijzen van de factuur.</p>`;
-  if(!prods.length)return h+'<p class="empty">Nog niets besteld deze week. Inkoop verschijnt hier zodra keukens bestellen.</p>';
-  h+=`<div class="card"><div class="grid2"><label class="f">Gekocht op naam van<select id="i-bv" data-ink="bv">${S.bvs.map(b=>`<option value="${b.id}" ${b.id===d.bv?'selected':''}>${esc(b.naam)}</option>`).join('')}</select></label>
-  <label class="f">Factuurtotaal groothandel (excl. btw)<input class="num" style="width:100%" inputmode="decimal" id="i-fact" data-ink="factuur" value="${esc(String(d.factuur).replace('.',','))}" placeholder="optioneel, ter controle"></label></div>
-  <div class="tablebox"><table><thead><tr><th>Product</th><th>Besteld</th><th>Dozen</th><th>Kg</th><th>Prijs</th><th>Totaal</th></tr></thead><tbody>`;
+  const setup=needSetup();if(setup)return'<h2>Voorraad</h2>'+setup;
+  const v=voorraad();
+  let h=`<h2>Voorraad</h2><p class="sub">Wat via inkoopfacturen is binnengekomen, min wat in opgeslagen verdelingen naar de keukens is gegaan. "Besteld" zijn bestellingen die nog niet verdeeld zijn.</p>`;
+  if(!S.inkopen.length)h+=`<div class="note" style="margin-bottom:12px">Er staan nog geen inkoopfacturen in. Ligt er al vlees op voorraad? Voer dat hieronder in als factuur met leverancier "Beginvoorraad".</div>`;
+  h+=`<div class="card"><div class="tablebox"><table><thead><tr><th>Product</th><th>Op voorraad</th><th>Besteld</th><th>Daarna</th><th>Kostprijs</th></tr></thead><tbody>`;
+  for(const p of S.producten){const x=v[p.id];const na=x.op-x.open;
+    h+=`<tr><td>${esc(p.naam)}</td><td>${x.op}${p.perKg&&x.inKg?`<div style="font-size:12px;color:var(--muted)">${kgFmt(x.opKg)}</div>`:''}</td><td>${x.open||'–'}</td><td>${na<0?`<span class="pill acc">${na}</span>`:na<=3&&x.in?`<span class="pill warn">${na}</span>`:na}</td><td>${p.prijs?eur.format(p.prijs)+(p.perKg?'/kg':'/doos'):'–'}</td></tr>`}
+  h+=`</tbody></table></div><p class="sub" style="margin:0;font-size:13px">Aantallen in dozen. Kostprijs is de prijs van de laatste inkoopfactuur; daartegen wordt doorbelast aan de BV's.</p></div>`;
+
+  const d=draft.inkoop;if(!d.init)Object.assign(d,{init:true,id:null,datum:new Date().toISOString().slice(0,10),leverancier:'',nummer:'',bv:hoofdBv(),factuur:'',items:{}});
+  h+=`<h2 id="i-form">${d.id?'Inkoopfactuur wijzigen':'Nieuwe inkoopfactuur'}</h2><div class="card"><div class="grid2">
+  <label class="f">Factuurdatum<input type="date" id="i-datum" data-inkf="datum" value="${esc(d.datum)}"></label>
+  <label class="f">Leverancier<input type="text" id="i-lev" data-inkf="leverancier" value="${esc(d.leverancier)}" placeholder="bijv. Ferdinand Zandbergen"></label>
+  <label class="f">Factuurnummer<input type="text" id="i-nr" data-inkf="nummer" value="${esc(d.nummer)}"></label>
+  <label class="f">Gekocht door<input type="text" value="${esc(bvName(hoofdBv()))}" disabled></label></div>
+  <div class="tablebox"><table><thead><tr><th>Product</th><th>Dozen</th><th>Kg</th><th>Prijs</th><th>Totaal</th></tr></thead><tbody>`;
   let tot=0;
-  for(const p of prods){const di=d.items[p.id]||{};const dz=di.dozen??ingekocht(week,p.id);const pr=di.prijs??(prijs(week,p.id)||'');
-    const kg=p.perKg?(di.kg??kgIngekocht(week,p.id)??''):'';const lt=p.perKg?num(kg)*num(pr):num(dz)*num(pr);tot+=lt;
-    h+=`<tr><td>${esc(p.naam)}</td><td>${totBesteld(week,p.id)}</td><td><input class="cnt" inputmode="numeric" id="i-d-${p.id}" data-inkd="${p.id}" value="${esc(dz)}"></td>
-    <td>${p.perKg?`<input class="num" inputmode="decimal" id="i-k-${p.id}" data-inkk="${p.id}" value="${esc(String(kg).replace('.',','))}" placeholder="kg">`:'–'}</td>
-    <td><input class="num" inputmode="decimal" id="i-p-${p.id}" data-inkp="${p.id}" value="${esc(String(pr).replace('.',','))}" placeholder="0,00" aria-label="Prijs ${p.perKg?'per kg':'per doos'}"><div style="font-size:11px;color:var(--muted)">${p.perKg?'per kg':'per doos'}</div></td><td class="money" id="i-t-${p.id}">${eur.format(lt)}</td></tr>`}
-  h+=`</tbody><tfoot><tr><td colspan="5">Totaal ingekocht</td><td id="i-tot">${eur.format(tot)}</td></tr></tfoot></table></div>
+  for(const p of S.producten){const di=d.items[p.id]||{};const dz=di.dozen??'';const kg=di.kg??'';const pr=di.prijs??(p.prijs||'');
+    const lt=p.perKg?num(kg)*num(pr):num(dz)*num(pr);tot+=lt;
+    h+=`<tr><td>${esc(p.naam)}</td><td><input class="cnt" inputmode="numeric" id="i-d-${p.id}" data-inkd="${p.id}" value="${esc(dz)}" placeholder="0"></td>
+    <td><input class="num" inputmode="decimal" id="i-k-${p.id}" data-inkk="${p.id}" value="${dec(kg)}" placeholder="${p.perKg?'kg':'(info)'}"></td>
+    <td><input class="num" inputmode="decimal" id="i-p-${p.id}" data-inkp="${p.id}" value="${dec(pr)}" placeholder="0,00" aria-label="Prijs ${p.perKg?'per kg':'per doos'}"><div style="font-size:11px;color:var(--muted)">${p.perKg?'per kg':'per doos'}</div></td><td class="money" id="i-t-${p.id}">${eur.format(lt)}</td></tr>`}
+  h+=`</tbody><tfoot><tr><td colspan="4">Totaal</td><td id="i-tot">${eur.format(tot)}</td></tr></tfoot></table></div>
+  <label class="f">Factuurtotaal excl. btw (ter controle)<input class="num" style="width:160px" inputmode="decimal" id="i-fact" data-ink="factuur" value="${dec(d.factuur)}" placeholder="optioneel"></label>
   <div id="i-check">${factCheck(tot,d.factuur)}</div>
-  <div class="actions"><button class="btn" data-act="saveInkoop">Inkoop opslaan</button></div></div>`;
+  <div class="actions"><button class="btn" data-act="saveInkoop">${d.id?'Wijzigingen opslaan':'Factuur opslaan'}</button>${d.id?'<button class="btn ghost" data-act="cancelInkoop">Annuleren</button>':''}</div></div>`;
+
+  h+=`<h2>Inkoopfacturen</h2>`;
+  if(!S.inkopen.length)h+='<p class="empty">Nog geen facturen ingevoerd.</p>';
+  else h+='<div class="stack">'+S.inkopen.map(f=>{const regels=Object.entries(f.regels||{});const tot=r2(regels.reduce((s,[pid,r])=>s+(isKg(pid)?num(r.kg):num(r.dozen))*num(r.prijs),0));
+    return`<div class="card"><div class="flow"><b style="flex:1">${esc(f.leverancier||'Onbekende leverancier')}</b><span class="pill">${esc(fmtDatum(f.datum))}</span></div>
+    <div style="color:var(--muted);font-size:13px">${f.factuurnummer?'Factuur '+esc(f.factuurnummer)+' · ':''}op naam van ${esc(bvName(f.bvId))}</div>
+    <div>${regels.map(([pid,r])=>`<div class="row"><div class="name">${esc(S.producten.find(p=>p.id===pid)?.naam||pid)}<small>${num(r.dozen)} dozen${r.kg?' · '+kgFmt(num(r.kg)):''} à ${eur.format(num(r.prijs))}/${isKg(pid)?'kg':'doos'}</small></div><span class="money">${eur.format(r2((isKg(pid)?num(r.kg):num(r.dozen))*num(r.prijs)))}</span></div>`).join('')}</div>
+    <div class="flow"><b style="flex:1">Totaal ${eur.format(tot)}</b><button class="btn small ghost" data-act="editInkoop" data-id="${f.id}">Wijzigen</button><button class="btn small ghost" data-act="askDel" data-del="inkopen/${f.id}">Verwijderen</button></div></div>`}).join('')+'</div>';
   return h}
 function factCheck(tot,f){if(String(f??'').trim()==='')return'';const diff=r2(num(f)-tot);
   return Math.abs(diff)<0.01?'<div class="note ok">Klopt met de factuur van de groothandel.</div>':`<div class="note">Verschil met factuur: ${eur.format(diff)}. Check aantallen of prijzen.</div>`}
@@ -311,42 +359,57 @@ function vVerdelen(){
   if(!prods.length)return h+'<p class="empty">Nog niets besteld deze week.</p>';
   if(draft.lev.week!==week){draft.lev={week};draft.levKg={}}
   for(const k of S.keukens){
-    h+=`<div class="card" style="margin-bottom:12px"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span></div><div>`;
+    h+=`<div class="card" style="margin-bottom:12px"><div class="flow"><h3 style="margin:0;flex:1">${esc(k.naam)}</h3><span class="pill">${esc(bvName(k.bvId))}</span>${afPill(k.id)}</div><div>`;
     for(const p of prods){const b=besteld(week,k.id,p.id);const v=draft.lev[k.id]?.[p.id]??geleverd(week,k.id,p.id);
       const kgv=draft.levKg?.[k.id]?.[p.id]??kgGeleverd(week,k.id,p.id)??'';
       h+=`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)}<small>besteld ${b} · ${eur.format(prijs(week,p.id))}/${p.perKg?'kg':'doos'}</small></div><div class="stepper"><button data-lstep="-1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Minder">−</button><input class="cnt" inputmode="numeric" id="l-${k.id}-${p.id}" data-lev="${k.id}|${p.id}" value="${v}"><button data-lstep="1" data-kid="${k.id}" data-pid="${p.id}" aria-label="Meer">+</button></div>
       ${p.perKg?`<label class="f" style="flex-direction:row;align-items:center;gap:6px"><input class="num" inputmode="decimal" id="lk-${k.id}-${p.id}" data-levkg="${k.id}|${p.id}" value="${esc(String(kgv).replace('.',','))}" placeholder="kg" aria-label="Kilo ${esc(p.naam)} ${esc(k.naam)}">kg</label>`:''}</div>`}
     h+='</div></div>'}
-  const f=weekFacts(week);
-  h+=`<div class="card"><h3>Controle</h3><div class="tablebox"><table><thead><tr><th>Product</th><th>Gekocht</th><th>Geleverd</th><th>Over</th></tr></thead><tbody>${f.rows.map(r=>`<tr><td>${esc(r.p.naam)}</td><td>${r.ink}</td><td>${r.lev}</td><td>${r.rest===0?'<span class="pill ok">0</span>':`<span class="pill ${r.rest<0?'acc':'warn'}">${r.rest}</span>`}</td></tr>${r.p.perKg?`<tr><td style="padding-left:18px;color:var(--muted)">in kilo's</td><td>${kgFmt(r.ik)}</td><td>${kgFmt(r.lk)}</td><td>${Math.abs(r.restKg)<0.01?'<span class="pill ok">0 kg</span>':`<span class="pill ${r.restKg<0?'acc':'warn'}">${kgFmt(r.restKg)}</span>`}</td></tr>`:''}`).join('')}</tbody></table></div>
-  ${f.rows.some(r=>r.p.perKg&&S.keukens.some(k=>geleverd(week,k.id,r.p.id)&&kgGeleverd(week,k.id,r.p.id)==null))?'<div class="note">Bij producten per kilo zijn nog niet alle kilo\'s ingevuld. Zolang dat zo is, rekent de afrekening die als € 0.</div>':''}
-  ${f.rows.some(r=>r.rest<0)?'<div class="note">Er is meer geleverd dan gekocht. Klopt de inkoop?</div>':f.restTot>0?`<div class="note">Er blijft ${eur.format(f.restTot)} over. Dat blijft voor rekening van ${esc(bvName(S.weken[week]?.inkoopBv))}.</div>`:''}
+  const v=voorraad();const done=verdeeld(week);
+  const rows=prods.map(p=>{const lev=S.keukens.reduce((s,k)=>s+num(draft.lev[k.id]?.[p.id]??geleverd(week,k.id,p.id)),0);const na=done?v[p.id].op:v[p.id].op-lev;return{p,lev,na}});
+  const gewijzigd=done?prods.filter(p=>S.weken[week]?.prijzen?.[p.id]!=null&&num(S.weken[week].prijzen[p.id])!==num(p.prijs)):[];
+  h+=`<div class="card"><div class="flow"><h3 style="margin:0;flex:1">Voorraad</h3>${done?'<span class="pill ok">Verdeling opgeslagen</span>':'<span class="pill warn">Nog niet opgeslagen</span>'}</div>
+  <div class="tablebox"><table><thead><tr><th>Product</th><th>Deze week</th><th>Voorraad daarna</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.p.naam)}</td><td>${r.lev}</td><td>${r.na<0?`<span class="pill acc">${r.na}</span>`:r.na}</td></tr>`).join('')}</tbody></table></div>
+  ${rows.some(r=>r.na<0)?'<div class="note">Er gaat meer uit dan er op voorraad is. Staan alle inkoopfacturen erin, ook de beginvoorraad?</div>':''}
+  ${prods.some(p=>p.perKg&&S.keukens.some(k=>geleverd(week,k.id,p.id)&&kgGeleverd(week,k.id,p.id)==null))?'<div class="note">Bij producten per kilo zijn nog niet alle kilo\'s ingevuld. Zolang dat zo is, rekent de afrekening die als € 0.</div>':''}
+  ${gewijzigd.length?`<div class="note">De kostprijs is veranderd sinds deze verdeling is opgeslagen: ${gewijzigd.map(p=>`${esc(p.naam)} ${eur.format(num(S.weken[week].prijzen[p.id]))} → ${eur.format(num(p.prijs))}`).join(', ')}. <button class="btn small ghost" data-act="refreshPrijzen">Nieuwe prijzen gebruiken</button></div>`:''}
+  <p class="sub" style="margin:0;font-size:13px">Bij opslaan worden de prijzen van deze week vastgezet, zodat een nieuwe inkoopfactuur oude weken niet verandert.</p>
   <div class="actions"><button class="btn" data-act="saveLev">Verdeling opslaan</button></div></div>`;
   return h}
 
 function vAfrekening(){
-  const wk=S.weken[week];
+  const wk=S.weken[week]||{};const cred=crediteur(week);const per=perBV(week);
   let h=`<h2>Afrekening week ${weekNo(week)}</h2>`;
-  if(!wk?.inkoopBv)h+='<p class="empty">Deze week heeft nog geen inkoop. Vul eerst <b>Inkoop</b> in, dan zie je hier wie wat moet betalen.</p>';
-  else{const per=perBV(week);const f=weekFacts(week);
-    h+=`<p class="sub">Ingekocht door <b>${esc(bvName(wk.inkoopBv))}</b> voor ${eur.format(f.inkoopTot)} excl. btw.</p><div class="stack">`;
-    for(const b of S.bvs){const a=per[b.id];if(!a)continue;const self=b.id===wk.inkoopBv;const done=wk.gefactureerd?.[b.id];
-      h+=`<div class="card"><div class="flow"><b>${esc(b.naam)}</b>${self?'':`<span class="arrow">→</span><b>${esc(bvName(wk.inkoopBv))}</b>`}<span style="flex:1"></span>${a.kgOpen?'<span class="pill acc">kg nog invullen</span>':''}${self?'<span class="pill">eigen gebruik</span>':done?'<span class="pill ok">Gefactureerd</span>':'<span class="pill warn">Open</span>'}</div>
+  if(!Object.keys(per).length)h+='<p class="empty">Deze week is er nog niets geleverd.</p>';
+  else{
+    h+=`<p class="sub">Geleverd uit de voorraad van <b>${esc(bvName(cred))}</b>, tegen kostprijs.${verdeeld(week)?'':' <b>Voorlopig:</b> de verdeling van deze week is nog niet opgeslagen, dit is op basis van de bestellingen.'}</p><div class="stack">`;
+    for(const b of S.bvs){const a=per[b.id];if(!a)continue;const self=b.id===cred;const done=wk.gefactureerd?.[b.id];
+      h+=`<div class="card"><div class="flow"><b>${esc(b.naam)}</b>${self?'':`<span class="arrow">→</span><b>${esc(bvName(cred))}</b>`}<span style="flex:1"></span>${a.kgOpen?'<span class="pill acc">kg nog invullen</span>':''}${self?'<span class="pill">eigen gebruik</span>':done?'<span class="pill ok">Gefactureerd</span>':'<span class="pill warn">Open</span>'}</div>
       <div class="big money">${eur.format(a.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw · ${eur.format(r2(a.bedrag*(1+BTW)))} incl. 9%</span></div>
       <details><summary style="cursor:pointer;color:var(--muted)">Specificatie</summary><div class="tablebox"><table><tbody>${a.regels.map(r=>`<tr><td>${esc(keuken(r.kid)?.naam)} · ${esc(S.producten.find(p=>p.id===r.pid)?.naam)}</td><td>${isKg(r.pid)?`${r.dozen} doos · ${r.kg==null?'? kg':kgFmt(r.kg)} × ${eur.format(r.prijs)}/kg`:`${r.dozen} × ${eur.format(r.prijs)}`}</td><td>${eur.format(r.bedrag)}</td></tr>`).join('')}</tbody></table></div></details>
       ${self?'':`<div class="actions"><button class="btn small ghost" data-inv="${b.id}">${done?'Markeer als open':'Markeer als gefactureerd'}</button></div>`}</div>`}
-    if(f.restTot)h+=`<div class="note">Over na verdelen: ${eur.format(f.restTot)}. Blijft bij ${esc(bvName(wk.inkoopBv))}.</div>`;
     h+='</div>'}
+  // Open weken per BV; filter op maand voor wie maandelijks factureert
+  const openWeken=Object.entries(S.weken).filter(([w,wd])=>wd.geleverd&&Object.entries(perBV(w)).some(([bv,a])=>bv!==(wd.inkoopBv||hoofdBv())&&!wd.gefactureerd?.[bv]&&a.bedrag));
+  const maanden=[...new Set(openWeken.map(([w])=>weekMaand(w)))].sort();
+  if(draft.periode!=='alles'&&!maanden.includes(draft.periode))draft.periode='alles';
   const open={};
-  for(const [w,wd] of Object.entries(S.weken)){if(!wd.inkoopBv)continue;const per=perBV(w);
-    for(const [bv,a] of Object.entries(per)){if(bv===wd.inkoopBv||wd.gefactureerd?.[bv]||!a.bedrag)continue;const key=bv+'|'+wd.inkoopBv;(open[key]||(open[key]={van:bv,naar:wd.inkoopBv,bedrag:0,weken:[]}));open[key].bedrag=r2(open[key].bedrag+a.bedrag);open[key].weken.push(w)}}
+  for(const [w,wd] of openWeken){if(draft.periode!=='alles'&&weekMaand(w)!==draft.periode)continue;const per=perBV(w);const c=wd.inkoopBv||hoofdBv();
+    for(const [bv,a] of Object.entries(per)){if(bv===c||wd.gefactureerd?.[bv]||!a.bedrag)continue;const key=bv+'|'+c;(open[key]||(open[key]={van:bv,naar:c,bedrag:0,weken:[]}));open[key].bedrag=r2(open[key].bedrag+a.bedrag);open[key].weken.push(w)}}
   const list=Object.values(open);
-  h+=`<h2>Nog te factureren</h2><p class="sub">Alle weken samen, zodat je per BV één rekening kunt maken.</p>`;
+  h+=`<h2>Nog te factureren</h2><p class="sub">Per zaak één factuur van de Bowling, voor een week, een maand of alles wat nog openstaat. Alleen weken met een opgeslagen verdeling tellen mee.</p>`;
+  if(maanden.length)h+=`<div class="chips" style="margin-bottom:12px"><button class="chip" data-periode="alles" aria-pressed="${draft.periode==='alles'}">Alles open</button>${maanden.map(m=>`<button class="chip" data-periode="${m}" aria-pressed="${draft.periode===m}">${esc(maandNaam(m))}</button>`).join('')}</div>`;
   if(!list.length)h+='<p class="empty">Alles is gefactureerd.</p>';
-  else{h+='<div class="stack">'+list.map(o=>`<div class="card"><div class="flow"><b>${esc(bvName(o.van))}</b><span class="arrow">betaalt aan</span><b>${esc(bvName(o.naar))}</b></div><div class="big money">${eur.format(o.bedrag)}</div><div style="color:var(--muted);font-size:13px">weken ${o.weken.sort().map(weekNo).join(', ')} · ${eur.format(r2(o.bedrag*(1+BTW)))} incl. 9% btw</div><div class="actions"><button class="btn small" data-text="${o.van}|${o.naar}">Factuurregels tonen</button><button class="btn small ghost" data-invall="${o.van}|${o.naar}">Alles markeren als gefactureerd</button></div>${draft.invoiceFor===o.van+'|'+o.naar?`<textarea id="inv-txt" readonly>${esc(invoiceText(o))}</textarea><div class="actions"><button class="btn small" data-act="copy">Kopiëren</button></div>`:''}</div>`).join('')+'</div>'}
+  else{h+='<div class="stack">'+list.map(o=>{const key=o.van+'|'+o.naar;const wk=o.weken.sort();
+    return`<div class="card"><div class="flow"><b>${esc(bvName(o.naar))}</b><span class="arrow">factureert aan</span><b>${esc(bvName(o.van))}</b></div><div class="big money">${eur.format(o.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw</span></div><div style="color:var(--muted);font-size:13px">${wk.length===1?'week':'weken'} ${wk.map(weekNo).join(', ')} · ${eur.format(r2(o.bedrag*(1+BTW)))} incl. 9% btw</div>
+    <div class="actions"><button class="btn small" data-text="${key}">Factuurregels tonen</button><button class="btn small ghost" data-invall="${key}" data-weken="${wk.join(',')}">Markeer als gefactureerd</button></div>${draft.invoiceFor===key?`<textarea id="inv-txt" readonly>${esc(invoiceText(o))}</textarea><div class="actions"><button class="btn small" data-act="copy">Kopiëren</button></div>`:''}</div>`}).join('')+'</div>'}
   return h}
+// Een week hoort bij de maand van zijn donderdag (zelfde regel als ISO-weeknummers)
+function weekMaand(w){const d=weekMonday(w);d.setUTCDate(d.getUTCDate()+3);return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')}
+const maandNaam=m=>new Date(m+'-15T12:00:00Z').toLocaleDateString('nl-NL',{month:'long',year:'numeric'});
 function invoiceText(o){
-  const lines=[`Factuur ${bvName(o.naar)} aan ${bvName(o.van)}`,`Doorbelasting vleesinkoop tegen inkoopprijs`,''];
+  const periode=draft.periode!=='alles'?maandNaam(draft.periode):o.weken.length===1?'week '+weekNo(o.weken[0]):'weken '+o.weken.map(weekNo).join(', ');
+  const lines=[`Factuur ${bvName(o.naar)} aan ${bvName(o.van)}`,`Doorbelasting vlees tegen inkoopprijs, ${periode}`,''];
   for(const w of o.weken.sort()){const a=perBV(w)[o.van];lines.push(`Week ${weekNo(w)} (${weekRange(w)})`);
     const agg={};for(const r of a.regels){const k=r.pid+'|'+r.prijs;const g=agg[k]||(agg[k]={pid:r.pid,prijs:r.prijs,dozen:0,kg:0,bedrag:0});g.dozen+=r.dozen;g.kg+=r.kg||0;g.bedrag=r2(g.bedrag+r.bedrag)}
     for(const r of Object.values(agg)){const n=S.producten.find(p=>p.id===r.pid)?.naam;lines.push(isKg(r.pid)?`  ${r.dozen} doos ${n}, ${kgFmt(r.kg)} à ${eur.format(r.prijs)}/kg = ${eur.format(r.bedrag)}`:`  ${r.dozen} doos ${n} à ${eur.format(r.prijs)} = ${eur.format(r.bedrag)}`)}
@@ -363,17 +426,18 @@ function vInstellingen(){
   h+=`<h2>Keukens en pincodes</h2><p class="sub">Elke keuken hoort bij één BV en logt in met een eigen pincode (4 tot 12 cijfers). De pincode zie je hier niet terug; je kunt wel een nieuwe instellen.</p><div class="card">${S.keukens.map(k=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(k.naam)} ${S.pinnen.includes(k.id)?'<span class="pill ok">pincode ingesteld</span>':'<span class="pill warn">geen pincode</span>'}<small>${esc(bvName(k.bvId))}</small></div>
     <input type="password" inputmode="numeric" autocomplete="new-password" id="pin-${k.id}" placeholder="nieuwe pincode" style="width:140px"><button class="btn small" data-act="setPin" data-id="${k.id}">Instellen</button><button class="btn small ghost" data-act="askDel" data-del="keukens/${k.id}">Verwijderen</button></div>`).join('')}
   <div class="row" style="flex-wrap:wrap"><input type="text" id="k-new" placeholder="Naam keuken" style="flex:1 1 140px"><select id="k-bv" style="flex:1 1 120px">${S.bvs.map(b=>`<option value="${b.id}">${esc(b.naam)}</option>`).join('')}</select><button class="btn small" data-act="addKeuken">Toevoegen</button></div></div>`;
-  h+=`<h2>Producten</h2><p class="sub">Alles wordt per doos besteld. De richtprijs vult de inkoop alvast in; de echte prijs zet je per week.</p><div class="card">${S.producten.map(p=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)} ${p.perKg?'<span class="pill acc">per kg</span>':''}<small>${p.omschrijving?esc(p.omschrijving)+' · ':''}${p.prijs?eur.format(p.prijs)+(p.perKg?' / kg':' / doos'):'geen richtprijs'}</small></div><button class="btn small ghost" data-act="toggleKg" data-id="${p.id}">${p.perKg?'Afrekenen per doos':'Afrekenen per kg'}</button><button class="btn small ghost" data-act="askDel" data-del="producten/${p.id}">Verwijderen</button></div>`).join('')}
+  h+=`<h2>Producten</h2><p class="sub">Alles wordt per doos besteld. De kostprijs wordt automatisch bijgewerkt met de prijs van de nieuwste inkoopfactuur.</p><div class="card">${S.producten.map(p=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)} ${p.perKg?'<span class="pill acc">per kg</span>':''}<small>${p.omschrijving?esc(p.omschrijving)+' · ':''}${p.prijs?eur.format(p.prijs)+(p.perKg?' / kg':' / doos'):'geen richtprijs'}</small></div><button class="btn small ghost" data-act="toggleKg" data-id="${p.id}">${p.perKg?'Afrekenen per doos':'Afrekenen per kg'}</button><button class="btn small ghost" data-act="askDel" data-del="producten/${p.id}">Verwijderen</button></div>`).join('')}
   <div class="row" style="flex-wrap:wrap"><input type="text" id="p-new" placeholder="Product, bijv. Ribeye" style="flex:2 1 140px"><input type="text" id="p-oms" placeholder="Doos, bijv. ±5 kg" style="flex:1 1 100px"><input class="num" inputmode="decimal" id="p-prijs" placeholder="richtprijs"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="p-kg">per kg</label><button class="btn small" data-act="addProduct">Toevoegen</button></div>
   <p class="sub" style="margin:0;font-size:13px">Per kg: keukens bestellen in dozen, maar bij het verdelen vul je per keuken de kilo's in en daarop wordt afgerekend.</p></div>`;
   const wa=S.instellingen||{};
-  h+=`<h2>WhatsApp</h2><p class="sub">Na het opslaan van een bestelling krijgt elke kok een knop om zijn bestelling via WhatsApp naar deze persoon te sturen. Laat het nummer leeg om de knop te verbergen.</p><div class="card"><div class="grid2">
+  h+=`<h2>Bezorger</h2><p class="sub">Koks kunnen hun bestelling via WhatsApp naar deze persoon sturen. Met een eigen pincode ziet hij alle bestellingen en vinkt hij af wat is afgeleverd. Laat het nummer leeg om de WhatsApp-knop te verbergen.</p><div class="card"><div class="grid2">
   <label class="f">Naam<input type="text" id="wa-naam" value="${esc(wa.naam||'')}" placeholder="bijv. Tarek"></label>
   <label class="f">Mobiel nummer<input type="text" inputmode="tel" id="wa-nummer" value="${esc(wa.nummer||'')}" placeholder="06 12345678"></label></div>
-  <div class="actions"><button class="btn small" data-act="saveWa">Opslaan</button>${wa.nummer?`<span class="pill ok">actief</span>`:'<span class="pill">uit</span>'}</div></div>`;
+  <div class="actions"><button class="btn small" data-act="saveWa">Opslaan</button>${wa.nummer?`<span class="pill ok">WhatsApp aan</span>`:'<span class="pill">WhatsApp uit</span>'}</div>
+  <div class="row" style="flex-wrap:wrap"><div class="name">Pincode bezorger ${S.pinnen.includes('__bezorger__')?'<span class="pill ok">pincode ingesteld</span>':'<span class="pill warn">geen pincode</span>'}</div>
+  <input type="password" inputmode="numeric" autocomplete="new-password" id="pin-__bezorger__" placeholder="nieuwe pincode" style="width:140px"><button class="btn small" data-act="setPin" data-id="__bezorger__">Instellen</button></div></div>`;
   h+=`<h2>Beheerderscode</h2><div class="card"><div class="row" style="flex-wrap:wrap"><input type="password" inputmode="numeric" autocomplete="new-password" id="pin-beheer" placeholder="nieuwe code, min. 6 cijfers" style="flex:1 1 180px"><button class="btn small" data-act="setPin" data-id="__beheer__">Wijzigen</button></div></div>
   <p style="text-align:center"><button class="linkbtn" data-act="logout">Uitloggen</button></p>`;
-  if(confirmDel)h=h.replace(`data-act="askDel" data-del="${confirmDel}">Verwijderen`,`data-act="doDel" data-del="${confirmDel}">Zeker weten?`);
   return h}
 let confirmDel=null;
 
@@ -386,10 +450,13 @@ document.addEventListener('submit',async e=>{e.preventDefault();
 document.addEventListener('click',async e=>{
   const t=e.target.closest('button');if(!t)return;
   if(t.id==='wprev'||t.id==='wnext'){week=shiftWeek(week,t.id==='wprev'?-1:1);draft.order={};draft.invoiceFor=null;
-    if(MODE==='keuken'){SCREEN='laden';render();try{await loadKeuken()}catch(err){toast(err.message)}SCREEN='app'}render();return}
+    if(MODE==='keuken'||MODE==='bezorger'){SCREEN='laden';render();try{MODE==='keuken'?await loadKeuken():await loadBezorger()}catch(err){toast(err.message)}if(PIN)SCREEN='app'}render();return}
   const act=t.dataset.act;
   if(act==='retry'){boot();return}
   if(act==='logout'){logout();return}
+  if(MODE==='bezorger'){
+    if(t.dataset.afvink){t.disabled=true;try{await rpc('bezorger_afvinken',{p_pin:PIN,p_week:week,p_keuken:t.dataset.afvink,p_afgeleverd:t.dataset.val==='1'});await loadBezorger();toast(t.dataset.val==='1'?'Afgevinkt':'Teruggezet')}catch(err){toast(err.message)}render()}
+    return}
   if(MODE==='keuken'){
     if(t.dataset.kstep){const pid=t.dataset.pid;draft.k[pid]=Math.max(0,num(draft.k[pid])+Number(t.dataset.kstep));$('#ko-'+pid).value=draft.k[pid]||'';return}
     if(act==='kSave'){const regels={};for(const p of K.producten){const v=num(draft.k[p.id]);if(v>0)regels[p.id]=v}
@@ -404,21 +471,39 @@ document.addEventListener('click',async e=>{
   if(t.dataset.lstep){const{kid,pid}=t.dataset;const inp=$(`#l-${kid}-${pid}`);const v=Math.max(0,num(inp.value)+Number(t.dataset.lstep));inp.value=v;(draft.lev[kid]||(draft.lev[kid]={}))[pid]=v;return}
   if(t.dataset.inv){const id=t.dataset.inv;const g={...(S.weken[week]?.gefactureerd||{})};g[id]=!g[id];return guard(()=>saveWeek({gefactureerd:g}))}
   if(t.dataset.text){draft.invoiceFor=draft.invoiceFor===t.dataset.text?null:t.dataset.text;render();return}
-  if(t.dataset.invall){const[van,naar]=t.dataset.invall.split('|');return guard(async()=>{for(const[w,wd]of Object.entries(S.weken)){if(wd.inkoopBv!==naar||wd.gefactureerd?.[van])continue;await put('weken',w,{...wd,gefactureerd:{...(wd.gefactureerd||{}),[van]:true}})}draft.invoiceFor=null},'Gemarkeerd als gefactureerd')}
+  if(t.dataset.periode){draft.periode=t.dataset.periode;draft.invoiceFor=null;render();return}
+  if(t.dataset.invall){const[van]=t.dataset.invall.split('|');const weken=(t.dataset.weken||'').split(',').filter(Boolean);
+    return guard(async()=>{await loadAll();for(const w of weken){const wd=S.weken[w];if(!wd||wd.gefactureerd?.[van])continue;await put('weken',w,{...wd,gefactureerd:{...(wd.gefactureerd||{}),[van]:true}})}draft.invoiceFor=null},'Gemarkeerd als gefactureerd')}
   if(act==='askDel'){confirmDel=t.dataset.del;render();return}
   if(act==='doDel'){const[c,id]=t.dataset.del.split('/');confirmDel=null;return guard(()=>del(c,id),'Verwijderd')}
   if(act==='saveOrder'){const k=keukenSel,d=draft.order[k]||{};const regels={};for(const p of S.producten){const v=num(d[p.id]);if(v>0)regels[p.id]=v}
     const note=$('#o-note')?.value.trim()||'';return guard(async()=>{await put('bestellingen',week+'_'+k,{week,keukenId:k,regels,opmerking:note,updatedAt:new Date().toISOString()});delete draft.order[k]},'Bestelling opgeslagen')}
   if(act==='toggleKg'){const{id,...p}=S.producten.find(x=>x.id===t.dataset.id);return guard(()=>put('producten',id,{...p,perKg:!p.perKg}),'Aangepast')}
-  if(act==='saveInkoop'){const d=draft.inkoop;const items={};for(const p of productsInWeek(week)){items[p.id]={dozen:num($('#i-d-'+p.id).value),prijs:num($('#i-p-'+p.id).value)};const ke=$('#i-k-'+p.id);if(ke&&ke.value.trim()!=='')items[p.id].kg=num(ke.value)}
-    const fv=String($('#i-fact').value).trim();return guard(async()=>{await saveWeek({inkoopBv:$('#i-bv').value,factuurTotaal:fv===''?null:num(fv),items});d.week=null},'Inkoop opgeslagen')}
+  if(act==='saveInkoop'){const d=draft.inkoop;const regels={};
+    for(const p of S.producten){const r={dozen:num($('#i-d-'+p.id).value),prijs:num($('#i-p-'+p.id).value)};const kg=num($('#i-k-'+p.id).value);if(kg>0)r.kg=kg;
+      if(r.dozen>0||kg>0)regels[p.id]=r}
+    const datum=$('#i-datum').value;if(!datum)return toast('Vul de factuurdatum in');
+    if(!Object.keys(regels).length)return toast('Vul bij minstens één product het aantal dozen in');
+    const fv=String($('#i-fact').value).trim();const id=d.id||newId();
+    return guard(async()=>{
+      await put('inkopen',id,{datum,leverancier:$('#i-lev').value.trim(),factuurnummer:$('#i-nr').value.trim(),bvId:hoofdBv(),regels,factuurTotaal:fv===''?null:num(fv)});
+      for(const[pid,r]of Object.entries(regels)){if(!r.prijs)continue; // kostprijs = prijs van de nieuwste factuur van dit product
+        const nieuwste=S.inkopen.filter(f=>num(f.regels?.[pid]?.prijs)>0).sort((a,b)=>String(b.datum).localeCompare(String(a.datum)))[0];
+        const{id:pidId,...p}=S.producten.find(x=>x.id===pid);if(nieuwste?.id===id&&num(p.prijs)!==r.prijs)await put('producten',pidId,{...p,prijs:r.prijs})}
+      S.inkopen.sort((a,b)=>String(b.datum).localeCompare(String(a.datum)));draft.inkoop={}},d.id?'Factuur bijgewerkt':'Factuur opgeslagen')}
+  if(act==='editInkoop'){const f=S.inkopen.find(x=>x.id===t.dataset.id);if(!f)return;
+    draft.inkoop={init:true,id:f.id,datum:f.datum||'',leverancier:f.leverancier||'',nummer:f.factuurnummer||'',bv:f.bvId||hoofdBv(),factuur:f.factuurTotaal??'',items:JSON.parse(JSON.stringify(f.regels||{}))};
+    render();$('#i-form')?.scrollIntoView({behavior:'smooth'});return}
+  if(act==='cancelInkoop'){draft.inkoop={};render();return}
+  if(act==='refreshPrijzen'){const prijzen={...(S.weken[week]?.prijzen||{})};for(const p of productsInWeek(week))prijzen[p.id]=num(p.prijs);return guard(()=>saveWeek({prijzen}),'Prijzen bijgewerkt')}
   if(act==='saveLev'){const g={};for(const k of S.keukens){g[k.id]={};for(const p of productsInWeek(week)){const el=$(`#l-${k.id}-${p.id}`);if(el)g[k.id][p.id]=num(el.value)}}
     const mine=JSON.parse(JSON.stringify(draft.levKg||{}));
     return guard(async()=>{
       await loadAll(); // haal kilo's op die keukens net zelf hebben ingevuld
       const kg=JSON.parse(JSON.stringify(S.weken[week]?.kg||{}));
       for(const[kid,ps]of Object.entries(mine))for(const[pid,v]of Object.entries(ps)){const m=kg[kid]||(kg[kid]={});if(String(v).trim()==='')delete m[pid];else m[pid]=num(v)}
-      await saveWeek({geleverd:g,kg});draft.lev={};draft.levKg={}},'Verdeling opgeslagen')}
+      const prijzen={...(S.weken[week]?.prijzen||{})};for(const p of productsInWeek(week))if(prijzen[p.id]==null)prijzen[p.id]=prijs(week,p.id); // prijzen vastzetten
+      await saveWeek({geleverd:g,kg,prijzen,inkoopBv:crediteur(week)});draft.lev={};draft.levKg={}},'Verdeling opgeslagen')}
   if(act==='copy'){const ta=$('#inv-txt');try{await navigator.clipboard.writeText(ta.value);toast('Gekopieerd')}catch(_){ta.focus();ta.select();toast('Tekst geselecteerd, kopieer hem nu')}return}
   if(act==='addBv'){const n=$('#bv-new').value.trim();if(!n)return toast('Vul een naam in');return guard(()=>put('bvs',newId(),{naam:n,volgorde:Date.now()}),'BV toegevoegd')}
   if(act==='saveBv'){const n=$('#bv-'+t.dataset.id).value.trim();if(!n)return;const{id,...b}=S.bvs.find(x=>x.id===t.dataset.id);return guard(()=>put('bvs',id,{...b,naam:n}),'Naam opgeslagen')}
@@ -440,15 +525,16 @@ document.addEventListener('input',e=>{const el=e.target;
   else if(el.dataset.lev){const[k,p]=el.dataset.lev.split('|');(draft.lev[k]||(draft.lev[k]={}))[p]=num(el.value)}
   else if(el.dataset.levkg){const[k,p]=el.dataset.levkg.split('|');(draft.levKg[k]||(draft.levKg[k]={}))[p]=el.value}
   else if(el.dataset.inkd||el.dataset.inkp||el.dataset.inkk){const pid=el.dataset.inkd||el.dataset.inkp||el.dataset.inkk,d=draft.inkoop;const it=d.items[pid]||(d.items[pid]={});if(el.dataset.inkd)it.dozen=el.value;else if(el.dataset.inkk)it.kg=el.value;else it.prijs=el.value;
-    $('#i-t-'+pid).textContent=eur.format(lineTotal(pid));let tot=0;for(const p of productsInWeek(week))tot+=lineTotal(p.id);$('#i-tot').textContent=eur.format(tot);$('#i-check').innerHTML=factCheck(tot,$('#i-fact').value)}
-  else if(el.dataset.ink==='factuur'){draft.inkoop.factuur=el.value;let tot=0;for(const p of productsInWeek(week))tot+=lineTotal(p.id);$('#i-check').innerHTML=factCheck(tot,el.value)}
+    $('#i-t-'+pid).textContent=eur.format(lineTotal(pid));let tot=0;for(const p of S.producten)tot+=lineTotal(p.id);$('#i-tot').textContent=eur.format(tot);$('#i-check').innerHTML=factCheck(tot,$('#i-fact').value)}
+  else if(el.dataset.inkf){draft.inkoop[el.dataset.inkf]=el.value}
+  else if(el.dataset.ink==='factuur'){draft.inkoop.factuur=el.value;let tot=0;for(const p of S.producten)tot+=lineTotal(p.id);$('#i-check').innerHTML=factCheck(tot,el.value)}
 });
 document.addEventListener('change',e=>{if(e.target.dataset.ink==='bv')draft.inkoop.bv=e.target.value});
 
 /* ---------- opstarten ---------- */
 async function doLogin(pin,manual){
   try{const j=await rpc('inloggen',{p_pin:pin});PIN=pin;store.set('vb-pin',pin);MODE=j.rol;
-    if(MODE==='beheer')await loadAll();else{K.keuken=j.keuken;await loadKeuken()}
+    if(MODE==='beheer')await loadAll();else if(MODE==='bezorger')await loadBezorger();else{K.keuken=j.keuken;await loadKeuken()}
     SCREEN='app'}
   catch(e){if(manual)toast(e.message);SCREEN='login';PIN=null;MODE=null;store.set('vb-pin',null)}
   render()}
@@ -460,7 +546,7 @@ async function boot(){
     const saved=store.get('vb-pin');if(saved)await doLogin(saved,false);else{SCREEN='login';render()}}
   catch(e){render.fout=e.message;SCREEN='fout';render()}}
 async function refresh(){if(SCREEN!=='app'||editing())return;
-  try{if(MODE==='beheer')await loadAll();else if(MODE==='keuken'&&!draft.k)await loadKeuken();safeRender()}catch(_){}}
+  try{if(MODE==='beheer')await loadAll();else if(MODE==='bezorger')await loadBezorger();else if(MODE==='keuken'&&!draft.k)await loadKeuken();safeRender()}catch(_){}}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refresh()});
 setInterval(refresh,60000);
 boot();
