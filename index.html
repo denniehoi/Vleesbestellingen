@@ -346,7 +346,7 @@ function vInkoop(){
   if(!S.inkopen.length)h+='<p class="empty">Nog geen facturen ingevoerd.</p>';
   else h+='<div class="stack">'+S.inkopen.map(f=>{const regels=Object.entries(f.regels||{});const tot=r2(regels.reduce((s,[pid,r])=>s+(isKg(pid)?num(r.kg):num(r.dozen))*num(r.prijs),0));
     return`<div class="card"><div class="flow"><b style="flex:1">${esc(f.leverancier||'Onbekende leverancier')}</b><span class="pill">${esc(fmtDatum(f.datum))}</span></div>
-    <div style="color:var(--muted);font-size:13px">${f.factuurnummer?'Factuur '+esc(f.factuurnummer)+' · ':''}op naam van ${esc(bvName(f.bvId))}</div>
+    <div style="color:var(--muted);font-size:13px">${f.factuurnummer?'Factuur '+esc(f.factuurnummer)+' · ':''}op naam van ${esc(bvName(f.bvId))}${f.opmerking?'<br>'+esc(f.opmerking):''}</div>
     <div>${regels.map(([pid,r])=>`<div class="row"><div class="name">${esc(S.producten.find(p=>p.id===pid)?.naam||pid)}<small>${num(r.dozen)} dozen${r.kg?' · '+kgFmt(num(r.kg)):''} à ${eur.format(num(r.prijs))}/${isKg(pid)?'kg':'doos'}</small></div><span class="money">${eur.format(r2((isKg(pid)?num(r.kg):num(r.dozen))*num(r.prijs)))}</span></div>`).join('')}</div>
     <div class="flow"><b style="flex:1">Totaal ${eur.format(tot)}</b><button class="btn small ghost" data-act="editInkoop" data-id="${f.id}">Wijzigen</button><button class="btn small ghost" data-act="askDel" data-del="inkopen/${f.id}">Verwijderen</button></div></div>`}).join('')+'</div>';
   return h}
