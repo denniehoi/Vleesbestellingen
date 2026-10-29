@@ -120,7 +120,7 @@ const TABS=[
   ['afrekening','Afrekening','<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z M9 8h6M9 12h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'],
   ['instellingen','Instellingen','<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>']
 ];
-const BTW=0.09;
+const btwPct=pid=>{const v=S.producten.find(p=>p.id===pid)?.btw;return v==null?9:num(v)}; // vlees 9%, papier e.d. 21%
 const CFG=window.VB_CONFIG||{};
 const S={bvs:[],keukens:[],producten:[],weken:{},orders:[],pinnen:[],instellingen:{},inkopen:[]};
 const K={keuken:null,producten:[],bestelling:null,geleverd:{},kg:{},gefactureerd:false,whatsapp:{},afgeleverd:null}; // keukenweergave
@@ -201,9 +201,9 @@ function voorraad(){
 function perBV(w){ // {bvId:{bedrag, kgOpen, regels:[{kid,pid,dozen,kg,prijs,bedrag}]}}
   const out={};
   for(const k of S.keukens){for(const p of S.producten){const d=geleverd(w,k.id,p.id);if(!d)continue;
-    const o=out[k.bvId]||(out[k.bvId]={bedrag:0,regels:[],kgOpen:false});const pr=prijs(w,p.id);
+    const o=out[k.bvId]||(out[k.bvId]={bedrag:0,btw:0,regels:[],kgOpen:false});const pr=prijs(w,p.id);
     const kg=p.perKg?kgGeleverd(w,k.id,p.id):null;if(p.perKg&&kg==null)o.kgOpen=true;
-    const b=r2(p.perKg?(kg||0)*pr:d*pr);o.bedrag=r2(o.bedrag+b);o.regels.push({kid:k.id,pid:p.id,dozen:d,kg,prijs:pr,bedrag:b})}}
+    const b=r2(p.perKg?(kg||0)*pr:d*pr);o.bedrag=r2(o.bedrag+b);o.btw=r2(o.btw+b*btwPct(p.id)/100);o.regels.push({kid:k.id,pid:p.id,dozen:d,kg,prijs:pr,bedrag:b})}}
   return out}
 function lineTotal(pid){const d=num($('#i-d-'+pid).value),p=num($('#i-p-'+pid).value);return isKg(pid)?num($('#i-k-'+pid)?.value)*p:d*p}
 async function saveWeek(patch){await loadAll(); // eerst verversen, zodat afvinkingen en kilo's van anderen blijven staan
@@ -389,7 +389,7 @@ function vAfrekening(){
     h+=`<p class="sub">Geleverd uit de voorraad van <b>${esc(bvName(cred))}</b>, tegen kostprijs.${verdeeld(week)?'':' <b>Voorlopig:</b> de verdeling van deze week is nog niet opgeslagen, dit is op basis van de bestellingen.'}</p><div class="stack">`;
     for(const b of S.bvs){const a=per[b.id];if(!a)continue;const self=b.id===cred;const done=wk.gefactureerd?.[b.id];
       h+=`<div class="card"><div class="flow"><b>${esc(b.naam)}</b>${self?'':`<span class="arrow">→</span><b>${esc(bvName(cred))}</b>`}<span style="flex:1"></span>${a.kgOpen?'<span class="pill acc">kg nog invullen</span>':''}${self?'<span class="pill">eigen gebruik</span>':done?'<span class="pill ok">Gefactureerd</span>':'<span class="pill warn">Open</span>'}</div>
-      <div class="big money">${eur.format(a.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw · ${eur.format(r2(a.bedrag*(1+BTW)))} incl. 9%</span></div>
+      <div class="big money">${eur.format(a.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw · ${eur.format(r2(a.bedrag+a.btw))} incl. btw</span></div>
       <details><summary style="cursor:pointer;color:var(--muted)">Specificatie</summary><div class="tablebox"><table><tbody>${a.regels.map(r=>`<tr><td>${esc(keuken(r.kid)?.naam)} · ${esc(S.producten.find(p=>p.id===r.pid)?.naam)}</td><td>${isKg(r.pid)?`${r.dozen} doos · ${r.kg==null?'? kg':kgFmt(r.kg)} × ${eur.format(r.prijs)}/kg`:`${r.dozen} × ${eur.format(r.prijs)}`}</td><td>${eur.format(r.bedrag)}</td></tr>`).join('')}</tbody></table></div></details>
       ${self?'':`<div class="actions"><button class="btn small ghost" data-inv="${b.id}">${done?'Markeer als open':'Markeer als gefactureerd'}</button></div>`}</div>`}
     h+='</div>'}
@@ -399,13 +399,13 @@ function vAfrekening(){
   if(draft.periode!=='alles'&&!maanden.includes(draft.periode))draft.periode='alles';
   const open={};
   for(const [w,wd] of openWeken){if(draft.periode!=='alles'&&weekMaand(w)!==draft.periode)continue;const per=perBV(w);const c=wd.inkoopBv||hoofdBv();
-    for(const [bv,a] of Object.entries(per)){if(bv===c||wd.gefactureerd?.[bv]||!a.bedrag)continue;const key=bv+'|'+c;(open[key]||(open[key]={van:bv,naar:c,bedrag:0,weken:[]}));open[key].bedrag=r2(open[key].bedrag+a.bedrag);open[key].weken.push(w)}}
+    for(const [bv,a] of Object.entries(per)){if(bv===c||wd.gefactureerd?.[bv]||!a.bedrag)continue;const key=bv+'|'+c;(open[key]||(open[key]={van:bv,naar:c,bedrag:0,btw:0,weken:[]}));open[key].bedrag=r2(open[key].bedrag+a.bedrag);open[key].btw=r2(open[key].btw+a.btw);open[key].weken.push(w)}}
   const list=Object.values(open);
   h+=`<h2>Nog te factureren</h2><p class="sub">Per zaak één factuur van de Bowling, voor een week, een maand of alles wat nog openstaat. Alleen weken met een opgeslagen verdeling tellen mee.</p>`;
   if(maanden.length)h+=`<div class="chips" style="margin-bottom:12px"><button class="chip" data-periode="alles" aria-pressed="${draft.periode==='alles'}">Alles open</button>${maanden.map(m=>`<button class="chip" data-periode="${m}" aria-pressed="${draft.periode===m}">${esc(maandNaam(m))}</button>`).join('')}</div>`;
   if(!list.length)h+='<p class="empty">Alles is gefactureerd.</p>';
   else{h+='<div class="stack">'+list.map(o=>{const key=o.van+'|'+o.naar;const wk=o.weken.sort();
-    return`<div class="card"><div class="flow"><b>${esc(bvName(o.naar))}</b><span class="arrow">factureert aan</span><b>${esc(bvName(o.van))}</b></div><div class="big money">${eur.format(o.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw</span></div><div style="color:var(--muted);font-size:13px">${wk.length===1?'week':'weken'} ${wk.map(weekNo).join(', ')} · ${eur.format(r2(o.bedrag*(1+BTW)))} incl. 9% btw</div>
+    return`<div class="card"><div class="flow"><b>${esc(bvName(o.naar))}</b><span class="arrow">factureert aan</span><b>${esc(bvName(o.van))}</b></div><div class="big money">${eur.format(o.bedrag)}<span style="font-size:14px;color:var(--muted);font-family:var(--body);font-weight:400"> excl. btw</span></div><div style="color:var(--muted);font-size:13px">${wk.length===1?'week':'weken'} ${wk.map(weekNo).join(', ')} · ${eur.format(r2(o.bedrag+o.btw))} incl. btw</div>
     <div class="actions"><button class="btn small" data-text="${key}">Factuurregels tonen</button><button class="btn small ghost" data-invall="${key}" data-weken="${wk.join(',')}">Markeer als gefactureerd</button></div>${draft.invoiceFor===key?`<textarea id="inv-txt" readonly>${esc(invoiceText(o))}</textarea><div class="actions"><button class="btn small" data-act="copy">Kopiëren</button></div>`:''}</div>`}).join('')+'</div>'}
   return h}
 // Een week hoort bij de maand van zijn donderdag (zelfde regel als ISO-weeknummers)
@@ -413,12 +413,16 @@ function weekMaand(w){const d=weekMonday(w);d.setUTCDate(d.getUTCDate()+3);retur
 const maandNaam=m=>new Date(m+'-15T12:00:00Z').toLocaleDateString('nl-NL',{month:'long',year:'numeric'});
 function invoiceText(o){
   const periode=draft.periode!=='alles'?maandNaam(draft.periode):o.weken.length===1?'week '+weekNo(o.weken[0]):'weken '+o.weken.map(weekNo).join(', ');
-  const lines=[`Factuur ${bvName(o.naar)} aan ${bvName(o.van)}`,`Doorbelasting vlees tegen inkoopprijs, ${periode}`,''];
+  const lines=[`Factuur ${bvName(o.naar)} aan ${bvName(o.van)}`,`Doorbelasting inkoop tegen inkoopprijs, ${periode}`,''];
+  const perTarief={}; // btw-percentage -> bedrag excl. btw
   for(const w of o.weken.sort()){const a=perBV(w)[o.van];lines.push(`Week ${weekNo(w)} (${weekRange(w)})`);
     const agg={};for(const r of a.regels){const k=r.pid+'|'+r.prijs;const g=agg[k]||(agg[k]={pid:r.pid,prijs:r.prijs,dozen:0,kg:0,bedrag:0});g.dozen+=r.dozen;g.kg+=r.kg||0;g.bedrag=r2(g.bedrag+r.bedrag)}
-    for(const r of Object.values(agg)){const n=S.producten.find(p=>p.id===r.pid)?.naam;lines.push(isKg(r.pid)?`  ${r.dozen} doos ${n}, ${kgFmt(r.kg)} à ${eur.format(r.prijs)}/kg = ${eur.format(r.bedrag)}`:`  ${r.dozen} doos ${n} à ${eur.format(r.prijs)} = ${eur.format(r.bedrag)}`)}
+    for(const r of Object.values(agg)){const n=S.producten.find(p=>p.id===r.pid)?.naam;const t=btwPct(r.pid);perTarief[t]=r2((perTarief[t]||0)+r.bedrag);
+      lines.push((isKg(r.pid)?`  ${r.dozen} doos ${n}, ${kgFmt(r.kg)} à ${eur.format(r.prijs)}/kg = ${eur.format(r.bedrag)}`:`  ${r.dozen} doos ${n} à ${eur.format(r.prijs)} = ${eur.format(r.bedrag)}`)+` (${t}% btw)`)}
     lines.push('')}
-  const btw=r2(o.bedrag*BTW);lines.push(`Subtotaal excl. btw: ${eur.format(o.bedrag)}`,`Btw 9%: ${eur.format(btw)}`,`Totaal: ${eur.format(r2(o.bedrag+btw))}`);return lines.join('\n')}
+  lines.push(`Subtotaal excl. btw: ${eur.format(o.bedrag)}`);let btw=0;
+  for(const t of Object.keys(perTarief).map(Number).sort((a,b)=>a-b)){const b=r2(perTarief[t]*t/100);btw=r2(btw+b);lines.push(`Btw ${t}% over ${eur.format(perTarief[t])}: ${eur.format(b)}`)}
+  lines.push(`Totaal: ${eur.format(r2(o.bedrag+btw))}`);return lines.join('\n')}
 
 function vInstellingen(){
   const bvRow=b=>`<div class="row" style="flex-wrap:wrap"><input type="text" id="bv-${b.id}" value="${esc(b.naam)}" style="flex:1 1 150px"><button class="btn small ghost" data-act="saveBv" data-id="${b.id}">Naam opslaan</button>${b.hoofd?'':`<button class="btn small ghost" data-act="setHoofd" data-id="${b.id}">Maak hoofd-BV</button>`}</div>`;
@@ -430,8 +434,8 @@ function vInstellingen(){
   h+=`<h2>Keukens en pincodes</h2><p class="sub">Elke keuken hoort bij één BV en logt in met een eigen pincode (4 tot 12 cijfers). De pincode zie je hier niet terug; je kunt wel een nieuwe instellen.</p><div class="card">${S.keukens.map(k=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(k.naam)} ${S.pinnen.includes(k.id)?'<span class="pill ok">pincode ingesteld</span>':'<span class="pill warn">geen pincode</span>'}<small>${esc(bvName(k.bvId))}</small></div>
     <input type="password" inputmode="numeric" autocomplete="new-password" id="pin-${k.id}" placeholder="nieuwe pincode" style="width:140px"><button class="btn small" data-act="setPin" data-id="${k.id}">Instellen</button><button class="btn small ghost" data-act="askDel" data-del="keukens/${k.id}">Verwijderen</button></div>`).join('')}
   <div class="row" style="flex-wrap:wrap"><input type="text" id="k-new" placeholder="Naam keuken" style="flex:1 1 140px"><select id="k-bv" style="flex:1 1 120px">${S.bvs.map(b=>`<option value="${b.id}">${esc(b.naam)}</option>`).join('')}</select><button class="btn small" data-act="addKeuken">Toevoegen</button></div></div>`;
-  h+=`<h2>Producten</h2><p class="sub">Alles wordt per doos besteld. De kostprijs wordt automatisch bijgewerkt met de prijs van de nieuwste inkoopfactuur.</p><div class="card">${S.producten.map(p=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)} ${p.perKg?'<span class="pill acc">per kg</span>':''}<small>${p.omschrijving?esc(p.omschrijving)+' · ':''}${p.prijs?eur.format(p.prijs)+(p.perKg?' / kg':' / doos'):'geen richtprijs'}</small></div><button class="btn small ghost" data-act="toggleKg" data-id="${p.id}">${p.perKg?'Afrekenen per doos':'Afrekenen per kg'}</button><button class="btn small ghost" data-act="askDel" data-del="producten/${p.id}">Verwijderen</button></div>`).join('')}
-  <div class="row" style="flex-wrap:wrap"><input type="text" id="p-new" placeholder="Product, bijv. Ribeye" style="flex:2 1 140px"><input type="text" id="p-oms" placeholder="Doos, bijv. ±5 kg" style="flex:1 1 100px"><input class="num" inputmode="decimal" id="p-prijs" placeholder="richtprijs"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="p-kg">per kg</label><button class="btn small" data-act="addProduct">Toevoegen</button></div>
+  h+=`<h2>Producten</h2><p class="sub">Alles wordt per doos besteld. De kostprijs wordt automatisch bijgewerkt met de prijs van de nieuwste inkoopfactuur.</p><div class="card">${S.producten.map(p=>`<div class="row" style="flex-wrap:wrap"><div class="name">${esc(p.naam)} ${p.perKg?'<span class="pill acc">per kg</span>':''} ${btwPct(p.id)!==9?`<span class="pill">${btwPct(p.id)}% btw</span>`:''}<small>${p.omschrijving?esc(p.omschrijving)+' · ':''}${p.prijs?eur.format(p.prijs)+(p.perKg?' / kg':' / doos'):'geen richtprijs'}</small></div><button class="btn small ghost" data-act="toggleKg" data-id="${p.id}">${p.perKg?'Afrekenen per doos':'Afrekenen per kg'}</button><button class="btn small ghost" data-act="askDel" data-del="producten/${p.id}">Verwijderen</button></div>`).join('')}
+  <div class="row" style="flex-wrap:wrap"><input type="text" id="p-new" placeholder="Product, bijv. Ribeye" style="flex:2 1 140px"><input type="text" id="p-oms" placeholder="Doos, bijv. ±5 kg" style="flex:1 1 100px"><input class="num" inputmode="decimal" id="p-prijs" placeholder="richtprijs"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="p-kg">per kg</label><select id="p-btw" aria-label="Btw-tarief"><option value="9">9% btw (voedsel)</option><option value="21">21% btw (overig)</option></select><button class="btn small" data-act="addProduct">Toevoegen</button></div>
   <p class="sub" style="margin:0;font-size:13px">Per kg: keukens bestellen in dozen, maar bij het verdelen vul je per keuken de kilo's in en daarop wordt afgerekend.</p></div>`;
   const wa=S.instellingen||{};
   h+=`<h2>Bezorger</h2><p class="sub">Koks kunnen hun bestelling via WhatsApp naar deze persoon sturen. Met een eigen pincode ziet hij alle bestellingen en vinkt hij af wat is afgeleverd. Laat het nummer leeg om de WhatsApp-knop te verbergen.</p><div class="card"><div class="grid2">
@@ -513,7 +517,7 @@ document.addEventListener('click',async e=>{
   if(act==='saveBv'){const n=$('#bv-'+t.dataset.id).value.trim();if(!n)return;const{id,...b}=S.bvs.find(x=>x.id===t.dataset.id);return guard(()=>put('bvs',id,{...b,naam:n}),'Naam opgeslagen')}
   if(act==='setHoofd'){return guard(async()=>{for(const{id,...b}of[...S.bvs]){const want=id===t.dataset.id;if(!!b.hoofd!==want)await put('bvs',id,{...b,hoofd:want})}},'Hoofd-BV ingesteld')}
   if(act==='addKeuken'){const n=$('#k-new').value.trim(),bv=$('#k-bv').value;if(!n||!bv)return toast('Vul een naam in en kies een BV');return guard(()=>put('keukens',newId(),{naam:n,bvId:bv,volgorde:Date.now()}),'Keuken toegevoegd. Stel nu een pincode in.')}
-  if(act==='addProduct'){const n=$('#p-new').value.trim();if(!n)return toast('Vul een productnaam in');return guard(()=>put('producten',newId(),{naam:n,omschrijving:$('#p-oms').value.trim(),prijs:num($('#p-prijs').value),perKg:$('#p-kg').checked,volgorde:Date.now()}),'Product toegevoegd')}
+  if(act==='addProduct'){const n=$('#p-new').value.trim();if(!n)return toast('Vul een productnaam in');return guard(()=>put('producten',newId(),{naam:n,omschrijving:$('#p-oms').value.trim(),prijs:num($('#p-prijs').value),perKg:$('#p-kg').checked,btw:num($('#p-btw').value),volgorde:Date.now()}),'Product toegevoegd')}
   if(act==='saveWa'){const naam=$('#wa-naam').value.trim(),nummer=$('#wa-nummer').value.trim();
     if(nummer&&waNummer(nummer).replace(/\D/g,'').length<10)return toast('Dit nummer lijkt niet te kloppen. Vul een mobiel nummer in, bijv. 06 12345678');
     return guard(()=>put('instellingen','algemeen',{...S.instellingen,naam,nummer}),'WhatsApp-instelling opgeslagen')}
